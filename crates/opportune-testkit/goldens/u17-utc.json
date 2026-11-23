@@ -1,0 +1,135 @@
+{
+  "id": "u17",
+  "use_case": "U17",
+  "zone": "UTC",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "America/Anchorage",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "team"
+              }
+            ]
+          },
+          "tags": [
+            "booth"
+          ],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T16:00Z",
+        "2027-06-15T02:00Z"
+      ],
+      "zone": "America/Anchorage"
+    },
+    "now": "2027-06-14T08:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "team",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": [
+          {
+            "from": "2027-06-13T08:00Z",
+            "until": "2027-06-15T08:00Z",
+            "zone": "America/Anchorage"
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "id": "booth",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "10:00-16:00"
+            ],
+            "mon": [
+              "10:00-16:00"
+            ],
+            "sat": [
+              "10:00-16:00"
+            ],
+            "sun": [
+              "10:00-16:00"
+            ],
+            "thu": [
+              "10:00-16:00"
+            ],
+            "tue": [
+              "10:00-16:00"
+            ],
+            "wed": [
+              "10:00-16:00"
+            ]
+          },
+          "zone": "event"
+        },
+        "when": {
+          "tag": "booth"
+        },
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "08:00-18:00"
+            ],
+            "mon": [
+              "08:00-18:00"
+            ],
+            "sat": [
+              "08:00-18:00"
+            ],
+            "sun": [
+              "08:00-18:00"
+            ],
+            "thu": [
+              "08:00-18:00"
+            ],
+            "tue": [
+              "08:00-18:00"
+            ],
+            "wed": [
+              "08:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T18:00Z\",\"end\":\"2027-06-14T18:30Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T18:30Z\",\"end\":\"2027-06-14T19:00Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T19:00Z\",\"end\":\"2027-06-14T19:30Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T19:30Z\",\"end\":\"2027-06-14T20:00Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T20:00Z\",\"end\":\"2027-06-14T20:30Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T20:30Z\",\"end\":\"2027-06-14T21:00Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T21:00Z\",\"end\":\"2027-06-14T21:30Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T21:30Z\",\"end\":\"2027-06-14T22:00Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T22:00Z\",\"end\":\"2027-06-14T22:30Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T22:30Z\",\"end\":\"2027-06-14T23:00Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T23:00Z\",\"end\":\"2027-06-14T23:30Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T23:30Z\",\"end\":\"2027-06-15T00:00Z\",\"eligible\":[[\"team\"]],\"assignment\":[[\"team\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":12}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T16:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]},{\"start\":\"2027-06-14T16:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]},{\"start\":\"2027-06-14T17:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]},{\"start\":\"2027-06-14T17:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]},{\"start\":\"2027-06-15T00:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]},{\"start\":\"2027-06-15T00:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]},{\"start\":\"2027-06-15T01:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]},{\"start\":\"2027-06-15T01:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"team\",\"code\":\"outside_window\",\"rule\":\"booth\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

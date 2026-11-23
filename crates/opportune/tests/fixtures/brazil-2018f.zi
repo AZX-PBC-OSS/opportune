@@ -1,0 +1,11 @@
+# Minimal zic source for the two-version time zone database fixture.
+#
+# The fixture proves that the same local time resolves to different instants on
+# either side of Brazil's 2019 abolition of daylight saving time. It holds only
+# the rules that make that difference visible, not the historical database.
+#
+# Regenerate from crates/opportune with:
+#   zic -d tests/fixtures/tzdb-2018 tests/fixtures/brazil-2018f.zi
+Rule	Brazil	2018	max	-	Nov	Sun>=1	0:00	1:00	-02
+Rule	Brazil	2018	max	-	Feb	Sun>=15	0:00	0	-03
+Zone	America/Sao_Paulo	-3:00	Brazil	-03/-02

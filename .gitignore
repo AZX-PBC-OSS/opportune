@@ -1,0 +1,67 @@
+# Rust build output
+/target/
+**/*.rs.bk
+*.pdb
+rustc-ice-*.txt
+
+# wasm-pack output and the npm package's own trees. `dist/` is already ignored
+# unanchored below; the js path is listed again so the rule reads where the
+# artefact actually lands without hunting the Python block. wasm-pack's
+# `--out-dir js/pkg` writes beside the package manifest, so the binding's
+# bundle is excluded there as well as at wasm-pack's own default location.
+crates/opportune-wasm/pkg/
+crates/opportune-wasm/js/pkg/
+crates/opportune-wasm/js/node_modules/
+crates/opportune-wasm/js/dist/
+# The doc-snippet gate's scratch tree: it compiles the extracted snippets inside the
+# package so their imports resolve to it, and removes the tree when it finishes.
+crates/opportune-wasm/js/.doc-snippets-*/
+# The suite's scratch tree for the top-level `using` case: the module has to sit inside
+# the package so `opportune` resolves through the package's own name, and the case
+# removes the tree when it finishes.
+crates/opportune-wasm/js/tests/.top-level-using-*/
+
+# Python build output and caches
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.egg-info/
+/build/
+# Unanchored: `uv build --out-dir dist` writes relative to the working directory, so
+# a build run from crates/opportune-py leaves its output there.
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local environment files — never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+
+# Bun lockfiles: the npm package is managed through npm (package-lock.json is
+# committed), so a stray `bun install` in crates/opportune-wasm/js must not add a
+# second lockfile for a different resolver.
+bun.lock
+bun.lockb
+
+# Editors and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Local tooling state
+.shipwright/
+# Internal planning material (spec, execution plan): reference input only, never
+# shipped. docs/ is reserved for the published documentation site.
+reference/
+
+# mkdocs build output
+/site/

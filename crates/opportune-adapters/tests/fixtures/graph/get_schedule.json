@@ -1,0 +1,77 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(microsoft.graph.scheduleInformation)",
+  "value": [
+    {
+      "scheduleId": "ana@example.com",
+      "availabilityView": "020000000",
+      "scheduleItems": [
+        {
+          "isPrivate": false,
+          "status": "busy",
+          "subject": "Interview: front-end round",
+          "location": "Room 4",
+          "start": { "dateTime": "2027-03-09T15:00:00.0000000", "timeZone": "UTC" },
+          "end": { "dateTime": "2027-03-09T16:00:00.0000000", "timeZone": "UTC" }
+        },
+        {
+          "isPrivate": false,
+          "status": "workingElsewhere",
+          "subject": "Cafe",
+          "start": { "dateTime": "2027-03-09T09:00:00.0000000", "timeZone": "UTC" },
+          "end": { "dateTime": "2027-03-09T10:00:00.0000000", "timeZone": "UTC" }
+        },
+        {
+          "isPrivate": true,
+          "status": "busy",
+          "subject": "Reminder",
+          "start": { "dateTime": "2027-03-09T10:00:30.0000000", "timeZone": "UTC" },
+          "end": { "dateTime": "2027-03-09T10:00:30.0000000", "timeZone": "UTC" }
+        }
+      ],
+      "workingHours": {
+        "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        "startTime": "09:00:00.0000000",
+        "endTime": "17:00:00.0000000",
+        "timeZone": { "name": "Eastern Standard Time" }
+      }
+    },
+    {
+      "scheduleId": "room-vienna@example.com",
+      "availabilityView": "",
+      "error": {
+        "message": "The mailbox 'room-vienna@example.com' is not resolvable.",
+        "responseCode": "ErrorInvalidRequest"
+      }
+    },
+    {
+      "scheduleId": "bo@example.com",
+      "availabilityView": "000000000",
+      "scheduleItems": [],
+      "workingHours": {
+        "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        "startTime": "09:00:00.0000000",
+        "endTime": "17:00:00.0000000",
+        "timeZone": {
+          "@odata.type": "#microsoft.graph.customTimeZone",
+          "bias": 60,
+          "name": "Customized Time Zone",
+          "standardOffset": {
+            "time": "02:00:00.0000000",
+            "dayOccurrence": 1,
+            "dayOfWeek": "sunday",
+            "month": 10,
+            "year": 0
+          },
+          "daylightOffset": {
+            "daylightBias": -60,
+            "time": "02:00:00.0000000",
+            "dayOccurrence": 3,
+            "dayOfWeek": "sunday",
+            "month": 3,
+            "year": 0
+          }
+        }
+      }
+    }
+  ]
+}

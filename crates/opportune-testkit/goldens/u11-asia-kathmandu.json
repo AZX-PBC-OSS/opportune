@@ -1,0 +1,255 @@
+{
+  "id": "u11",
+  "use_case": "U11",
+  "zone": "Asia/Kathmandu",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "candidates": [
+        "2027-06-14T03:15Z",
+        "2027-06-14T03:45Z",
+        "2027-06-14T04:15Z",
+        "2027-06-14T04:45Z",
+        "2027-06-14T05:15Z",
+        "2027-06-14T05:45Z"
+      ],
+      "display_zone": "Asia/Kathmandu",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "at_least": 1,
+                "of": {
+                  "tag": "pool/interviewers"
+                }
+              }
+            ]
+          },
+          "tags": [
+            "interview"
+          ],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T03:15Z",
+        "2027-06-14T06:15Z"
+      ],
+      "zone": "Asia/Kathmandu"
+    },
+    "now": "2027-06-13T18:15Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:15Z",
+              "2027-06-14T00:45Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview"
+            ]
+          },
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:45Z",
+              "2027-06-14T01:15Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview"
+            ]
+          }
+        ],
+        "id": "ana",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "pool/interviewers"
+        ],
+        "zone": "Asia/Kathmandu",
+        "zone_periods": []
+      },
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:15Z",
+              "2027-06-14T00:45Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview"
+            ]
+          },
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:45Z",
+              "2027-06-14T01:15Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview"
+            ]
+          }
+        ],
+        "id": "bo",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "pool/interviewers"
+        ],
+        "zone": "Asia/Kathmandu",
+        "zone_periods": []
+      },
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:15Z",
+              "2027-06-14T00:45Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview"
+            ]
+          },
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:45Z",
+              "2027-06-14T01:15Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview"
+            ]
+          }
+        ],
+        "id": "cy",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "pool/interviewers"
+        ],
+        "zone": "Asia/Kathmandu",
+        "zone_periods": []
+      },
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T04:15Z",
+              "2027-06-14T06:15Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "dee",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "pool/interviewers"
+        ],
+        "zone": "Asia/Kathmandu",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-18:00"
+            ],
+            "mon": [
+              "09:00-18:00"
+            ],
+            "sat": [
+              "09:00-18:00"
+            ],
+            "sun": [
+              "09:00-18:00"
+            ],
+            "thu": [
+              "09:00-18:00"
+            ],
+            "tue": [
+              "09:00-18:00"
+            ],
+            "wed": [
+              "09:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "each_day",
+        "kind": "cap",
+        "params": {
+          "count": {
+            "tag": "interview"
+          },
+          "limit": 2,
+          "measure": "count",
+          "per": "each",
+          "period": "day",
+          "week_starts": "mon",
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "pool_week",
+        "kind": "cap",
+        "params": {
+          "count": {
+            "tag": "interview"
+          },
+          "limit": 8,
+          "measure": "count",
+          "per": "pooled",
+          "period": "week",
+          "week_starts": "mon",
+          "zone": "event"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:15Z\",\"end\":\"2027-06-14T03:45Z\",\"eligible\":[[\"dee\"]],\"assignment\":[[\"dee\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:45Z\",\"end\":\"2027-06-14T04:15Z\",\"eligible\":[[\"dee\"]],\"assignment\":[[\"dee\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":2}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T04:15Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"bo\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"cy\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"dee\",\"code\":\"blocked\",\"tags\":[]}]},{\"start\":\"2027-06-14T04:45Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"bo\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"cy\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"dee\",\"code\":\"blocked\",\"tags\":[]}]},{\"start\":\"2027-06-14T05:15Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"bo\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"cy\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"dee\",\"code\":\"blocked\",\"tags\":[]}]},{\"start\":\"2027-06-14T05:45Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"bo\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"cy\",\"code\":\"cap_reached\",\"rule\":\"each_day\",\"tags\":[],\"params\":{\"used\":2,\"limit\":2,\"bucket\":\"2027-06-14\"}},{\"participant\":\"dee\",\"code\":\"blocked\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[{\"code\":\"block_missing_event_key\",\"message\":\"participant `ana` holds 2 block(s) with no event key that pooled cap `pool_week` counts one by one; give them a key or an occurrence, or a copy on another calendar counts twice\",\"path\":\"/participants/0/calendar\"},{\"code\":\"block_missing_event_key\",\"message\":\"participant `bo` holds 2 block(s) with no event key that pooled cap `pool_week` counts one by one; give them a key or an occurrence, or a copy on another calendar counts twice\",\"path\":\"/participants/1/calendar\"},{\"code\":\"block_missing_event_key\",\"message\":\"participant `cy` holds 2 block(s) with no event key that pooled cap `pool_week` counts one by one; give them a key or an occurrence, or a copy on another calendar counts twice\",\"path\":\"/participants/2/calendar\"}],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

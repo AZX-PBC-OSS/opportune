@@ -1,0 +1,199 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p32o8nsu6u1m9c\"",
+  "summary": "tenant@example.com",
+  "updated": "2027-03-01T15:00:00.000Z",
+  "timeZone": "America/New_York",
+  "accessRole": "reader",
+  "defaultReminders": [],
+  "nextSyncToken": "CJDUzdKmzZMDLCiPnNAGGAU=",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0001\"",
+      "id": "evt-focus",
+      "status": "confirmed",
+      "summary": "Focus time",
+      "start": { "dateTime": "2027-03-09T09:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-09T10:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-focus@example.com",
+      "eventType": "focusTime",
+      "transparency": "opaque",
+      "attendees": [{ "email": "tenant@example.com", "self": true, "responseStatus": "accepted" }]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0002\"",
+      "id": "evt-working-location",
+      "status": "confirmed",
+      "summary": "Working from the cafe",
+      "start": { "date": "2027-03-09" },
+      "end": { "date": "2027-03-10" },
+      "iCalUID": "evt-working-location@example.com",
+      "eventType": "workingLocation",
+      "transparency": "transparent",
+      "workingLocationProperties": { "type": "customLocation", "customLocation": { "label": "Cafe" } }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0003\"",
+      "id": "evt-ooo",
+      "status": "confirmed",
+      "summary": "Customer onsite",
+      "start": { "dateTime": "2027-03-09T11:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-09T12:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-ooo@example.com",
+      "eventType": "outOfOffice",
+      "transparency": "opaque",
+      "outOfOfficeProperties": { "autoDeclineMode": "declineNone" }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0004\"",
+      "id": "evt-birthday",
+      "status": "confirmed",
+      "summary": "Ada's birthday",
+      "start": { "date": "2027-03-09" },
+      "end": { "date": "2027-03-10" },
+      "iCalUID": "evt-birthday@example.com",
+      "eventType": "birthday",
+      "transparency": "transparent"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0005\"",
+      "id": "evt-from-gmail",
+      "status": "confirmed",
+      "summary": "Flight to Vienna",
+      "start": { "dateTime": "2027-03-09T13:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-09T15:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-from-gmail@example.com",
+      "eventType": "fromGmail",
+      "transparency": "opaque"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0006\"",
+      "id": "evt-default",
+      "status": "confirmed",
+      "summary": "Planning",
+      "start": { "dateTime": "2027-03-10T09:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-10T10:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-default@example.com",
+      "transparency": "opaque"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0007\"",
+      "id": "evt-cancelled",
+      "status": "cancelled",
+      "summary": "Cancelled planning",
+      "iCalUID": "evt-cancelled@example.com"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0008\"",
+      "id": "evt-declined",
+      "status": "confirmed",
+      "summary": "Declined invitation",
+      "start": { "dateTime": "2027-03-10T10:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-10T11:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-declined@example.com",
+      "transparency": "opaque",
+      "attendees": [{ "email": "tenant@example.com", "self": true, "responseStatus": "declined" }]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0009\"",
+      "id": "evt-needs-action",
+      "status": "confirmed",
+      "summary": "Unanswered invitation",
+      "start": { "dateTime": "2027-03-10T11:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-10T12:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-needs-action@example.com",
+      "transparency": "opaque",
+      "attendees": [{ "email": "tenant@example.com", "self": true, "responseStatus": "needsAction" }]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0010\"",
+      "id": "evt-tentative",
+      "status": "confirmed",
+      "summary": "Maybe",
+      "start": { "dateTime": "2027-03-10T13:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-10T14:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-tentative@example.com",
+      "transparency": "opaque",
+      "attendees": [{ "email": "tenant@example.com", "self": true, "responseStatus": "tentative" }]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0011\"",
+      "id": "evt-zero",
+      "status": "confirmed",
+      "summary": "Zero-length reminder",
+      "start": { "dateTime": "2027-03-10T10:00:30-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-10T10:00:30-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-zero@example.com",
+      "transparency": "opaque"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0012\"",
+      "id": "evt-unspecified-end",
+      "status": "confirmed",
+      "summary": "Open-ended",
+      "start": { "dateTime": "2027-03-11T09:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-11T10:00:00-05:00", "timeZone": "America/New_York" },
+      "endTimeUnspecified": true,
+      "iCalUID": "evt-unspecified-end@example.com",
+      "transparency": "opaque"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0013\"",
+      "id": "evt-all-day",
+      "status": "confirmed",
+      "summary": "Time off",
+      "start": { "date": "2027-03-11" },
+      "end": { "date": "2027-03-12" },
+      "iCalUID": "evt-all-day@example.com",
+      "transparency": "opaque",
+      "extendedProperties": { "shared": { "opportune.tags": "time-off" } }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0014\"",
+      "id": "evt-recurring",
+      "status": "confirmed",
+      "summary": "Interview: platform round",
+      "start": { "dateTime": "2027-03-09T10:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-09T11:00:00-05:00", "timeZone": "America/New_York" },
+      "recurringEventId": "series-platform",
+      "originalStartTime": { "dateTime": "2027-03-09T10:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "series-platform@example.com",
+      "transparency": "opaque"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"tenant-0015\"",
+      "id": "evt-markers",
+      "status": "confirmed",
+      "summary": "External booking",
+      "start": { "dateTime": "2027-03-09T14:00:00-05:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2027-03-09T15:00:00-05:00", "timeZone": "America/New_York" },
+      "iCalUID": "evt-markers@example.com",
+      "transparency": "opaque",
+      "extendedProperties": {
+        "shared": {
+          "opportune.tags": "team/sales interview/platform not:a:tag",
+          "opportune.event_key": "booking-42"
+        },
+        "private": {
+          "opportune.tags": "interview/platform private/note",
+          "opportune.event_key": "private-key"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+{
+  "id": "u8",
+  "use_case": "U8",
+  "zone": "America/Los_Angeles",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "America/Los_Angeles",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "at_least": 1,
+                "of": {
+                  "tag": "kind/room"
+                }
+              },
+              {
+                "at_least": 1,
+                "of": {
+                  "any": [
+                    {
+                      "tag": "level/senior"
+                    },
+                    {
+                      "tag": "level/junior"
+                    }
+                  ]
+                }
+              },
+              {
+                "at_least": 1,
+                "of": {
+                  "tag": "team/sales"
+                }
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T16:00Z",
+        "2027-06-14T17:00Z"
+      ],
+      "zone": "America/Los_Angeles"
+    },
+    "now": "2027-06-14T07:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "room",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "kind/room"
+        ],
+        "zone": "America/Los_Angeles",
+        "zone_periods": []
+      },
+      {
+        "calendar": [],
+        "id": "sen",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "level/senior"
+        ],
+        "zone": "America/Los_Angeles",
+        "zone_periods": []
+      },
+      {
+        "calendar": [],
+        "id": "jun",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "level/junior"
+        ],
+        "zone": "America/Los_Angeles",
+        "zone_periods": []
+      },
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T16:30Z",
+              "2027-06-14T17:00Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "sales",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "team/sales"
+        ],
+        "zone": "America/Los_Angeles",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-18:00"
+            ],
+            "mon": [
+              "09:00-18:00"
+            ],
+            "sat": [
+              "09:00-18:00"
+            ],
+            "sun": [
+              "09:00-18:00"
+            ],
+            "thu": [
+              "09:00-18:00"
+            ],
+            "tue": [
+              "09:00-18:00"
+            ],
+            "wed": [
+              "09:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T16:00Z\",\"end\":\"2027-06-14T16:30Z\",\"eligible\":[[\"room\"],[\"jun\",\"sen\"],[\"sales\"]],\"assignment\":[[\"room\"],[\"jun\"],[\"sales\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":1}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T16:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"sales\",\"code\":\"blocked\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

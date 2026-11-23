@@ -1,0 +1,7 @@
+# Pinned for reproducible builds: everyone — maintainers, CI, and the release
+# pipeline — compiles with the same compiler. Dependabot does not track this file;
+# bump it deliberately, at the same time as the workspace `rust-version`.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

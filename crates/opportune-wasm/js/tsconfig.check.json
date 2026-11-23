@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The suite answers from the built package, importing it by its published name,
+    // while the typechecker resolves that name to the source it is generated from:
+    // `node --test` and `bun test` can only run what was built, and `npm run check`
+    // must not need a wasm build to typecheck the tests. A test written in
+    // TypeScript therefore takes its types from `src/` and its runtime from `dist/`,
+    // the same two artefacts a consumer of the package gets.
+    //
+    // This is the typechecker's alias, and so it lives in the one config only
+    // `tsc` reads. Bun also reads `tsconfig.json` — but as a runtime resolution
+    // map, and a `paths` entry there points the executing suite at `src/`, where
+    // the compiled wasm module is not; keeping the alias here is what makes the
+    // two runtimes resolve the published name identically.
+    // The subpaths carry their own aliases for the same reason: a test that imports
+    // `opportune/adapters/graph` or `opportune/presets` has to typecheck against the
+    // source too, or the check would need the built `dist/` the tests run from.
+    "paths": {
+      "opportune": ["./src/index.ts"],
+      "opportune/presets": ["./src/presets-entry.ts"],
+      "opportune/adapters/graph": ["./src/adapters/graph.ts"],
+      "opportune/adapters/google": ["./src/adapters/google.ts"]
+    }
+  }
+}

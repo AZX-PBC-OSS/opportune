@@ -1,0 +1,126 @@
+{
+  "id": "u16",
+  "use_case": "U16",
+  "zone": "UTC",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "UTC",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "rich"
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T00:00Z",
+        "2027-06-15T00:00Z"
+      ],
+      "zone": "UTC"
+    },
+    "now": "2027-06-13T12:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "rich",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "event",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "10:00-12:00",
+              "14:00-16:00"
+            ],
+            "mon": [
+              "10:00-12:00",
+              "14:00-16:00"
+            ],
+            "sat": [
+              "10:00-12:00",
+              "14:00-16:00"
+            ],
+            "sun": [
+              "10:00-12:00",
+              "14:00-16:00"
+            ],
+            "thu": [
+              "10:00-12:00",
+              "14:00-16:00"
+            ],
+            "tue": [
+              "10:00-12:00",
+              "14:00-16:00"
+            ],
+            "wed": [
+              "10:00-12:00",
+              "14:00-16:00"
+            ]
+          },
+          "zone": "event"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-17:00"
+            ],
+            "mon": [
+              "09:00-17:00"
+            ],
+            "thu": [
+              "09:00-17:00"
+            ],
+            "tue": [
+              "09:00-17:00"
+            ],
+            "wed": [
+              "09:00-17:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T10:00Z\",\"end\":\"2027-06-14T10:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T10:30Z\",\"end\":\"2027-06-14T11:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T11:00Z\",\"end\":\"2027-06-14T11:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T11:30Z\",\"end\":\"2027-06-14T12:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T14:00Z\",\"end\":\"2027-06-14T14:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T14:30Z\",\"end\":\"2027-06-14T15:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T15:00Z\",\"end\":\"2027-06-14T15:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T15:30Z\",\"end\":\"2027-06-14T16:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":8}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T00:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T00:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T01:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T01:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T02:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T02:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T03:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T03:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T04:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T04:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T05:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T05:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T06:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T06:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T07:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T07:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T08:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T08:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T09:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T09:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T12:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T12:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T13:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T13:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T16:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T16:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T17:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T17:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T18:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T18:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T19:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T19:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T20:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T20:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T21:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T21:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T22:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T22:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T23:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]},{\"start\":\"2027-06-14T23:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"event\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

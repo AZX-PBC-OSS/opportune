@@ -1,0 +1,209 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p32o8nsu6u1m7f\"",
+  "summary": "ana@example.com",
+  "description": "Ana's calendar",
+  "updated": "2027-03-01T14:22:09.512Z",
+  "timeZone": "America/New_York",
+  "accessRole": "owner",
+  "defaultReminders": [{ "method": "popup", "minutes": 10 }],
+  "nextSyncToken": "CJDUzdKmzZMDFOiPnNAGGAU=",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732712000\"",
+      "id": "ana-shared-interview-0900",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=ana-shared-interview-0900",
+      "created": "2027-02-01T09:05:00.000Z",
+      "updated": "2027-02-01T09:05:00.000Z",
+      "summary": "Interview: front-end round",
+      "description": "Agenda in the shared doc",
+      "creator": { "email": "ana@example.com", "self": true },
+      "organizer": { "email": "ana@example.com", "self": true },
+      "start": {
+        "dateTime": "2027-03-09T10:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "end": {
+        "dateTime": "2027-03-09T11:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "recurringEventId": "series-interview",
+      "originalStartTime": {
+        "dateTime": "2027-03-09T10:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "iCalUID": "series-interview@example.com",
+      "sequence": 2,
+      "attendees": [
+        {
+          "email": "ana@example.com",
+          "organizer": true,
+          "self": true,
+          "responseStatus": "accepted"
+        },
+        { "email": "bo@example.com", "responseStatus": "accepted" }
+      ],
+      "attendeesOmitted": false,
+      "hangoutLink": "https://meet.google.com/abc-defg-hij",
+      "conferenceData": {
+        "entryPoints": [
+          {
+            "entryPointType": "video",
+            "uri": "https://meet.google.com/abc-defg-hij",
+            "label": "meet.google.com/abc-defg-hij"
+          }
+        ]
+      },
+      "reminders": { "useDefault": false, "overrides": [] },
+      "eventType": "default",
+      "transparency": "opaque",
+      "extendedProperties": {
+        "shared": { "opportune.tags": "interview/front-end" }
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732712001\"",
+      "id": "ana-shared-interview-1000",
+      "status": "confirmed",
+      "created": "2027-02-01T09:06:00.000Z",
+      "updated": "2027-02-01T09:06:00.000Z",
+      "summary": "Interview: front-end round",
+      "creator": { "email": "ana@example.com", "self": true },
+      "organizer": { "email": "ana@example.com", "self": true },
+      "start": {
+        "dateTime": "2027-03-10T10:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "end": {
+        "dateTime": "2027-03-10T11:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "recurringEventId": "series-interview",
+      "originalStartTime": {
+        "dateTime": "2027-03-10T10:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "iCalUID": "series-interview@example.com",
+      "sequence": 2,
+      "attendees": [
+        {
+          "email": "ana@example.com",
+          "organizer": true,
+          "self": true,
+          "responseStatus": "accepted"
+        },
+        { "email": "bo@example.com", "responseStatus": "accepted" }
+      ],
+      "reminders": { "useDefault": true },
+      "eventType": "default",
+      "transparency": "opaque",
+      "extendedProperties": {
+        "shared": { "opportune.tags": "interview/front-end" }
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732712002\"",
+      "id": "ana-own-interview-1030",
+      "status": "confirmed",
+      "created": "2027-02-02T10:07:00.000Z",
+      "updated": "2027-02-02T10:07:00.000Z",
+      "summary": "Interview: backend pairing",
+      "creator": { "email": "ana@example.com", "self": true },
+      "organizer": { "email": "ana@example.com", "self": true },
+      "start": {
+        "dateTime": "2027-03-10T11:30:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "end": {
+        "dateTime": "2027-03-10T12:30:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "iCalUID": "ana-own-interview-1030@example.com",
+      "sequence": 0,
+      "attendees": [
+        {
+          "email": "ana@example.com",
+          "organizer": true,
+          "self": true,
+          "responseStatus": "accepted"
+        }
+      ],
+      "reminders": { "useDefault": true },
+      "eventType": "default",
+      "transparency": "opaque",
+      "extendedProperties": {
+        "shared": { "opportune.tags": "interview" }
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732712003\"",
+      "id": "ana-pto-0311",
+      "status": "confirmed",
+      "created": "2027-02-03T11:08:00.000Z",
+      "updated": "2027-02-03T11:08:00.000Z",
+      "summary": "Time off",
+      "creator": { "email": "ana@example.com", "self": true },
+      "organizer": { "email": "ana@example.com", "self": true },
+      "start": { "date": "2027-03-11" },
+      "end": { "date": "2027-03-12" },
+      "transparency": "opaque",
+      "iCalUID": "ana-pto-0311@example.com",
+      "sequence": 0,
+      "reminders": { "useDefault": true },
+      "eventType": "default"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732712004\"",
+      "id": "ana-focus-0312",
+      "status": "confirmed",
+      "created": "2027-02-04T12:09:00.000Z",
+      "updated": "2027-02-04T12:09:00.000Z",
+      "summary": "Focus time",
+      "creator": { "email": "ana@example.com", "self": true },
+      "organizer": { "email": "ana@example.com", "self": true },
+      "start": {
+        "dateTime": "2027-03-12T09:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "end": {
+        "dateTime": "2027-03-12T11:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "iCalUID": "ana-focus-0312@example.com",
+      "sequence": 0,
+      "eventType": "focusTime",
+      "transparency": "opaque",
+      "reminders": { "useDefault": true }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732712005\"",
+      "id": "ana-deep-work-0312",
+      "status": "confirmed",
+      "created": "2027-02-05T13:10:00.000Z",
+      "updated": "2027-02-05T13:10:00.000Z",
+      "summary": "Deep work",
+      "creator": { "email": "ana@example.com", "self": true },
+      "organizer": { "email": "ana@example.com", "self": true },
+      "start": {
+        "dateTime": "2027-03-12T13:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "end": {
+        "dateTime": "2027-03-12T14:00:00-05:00",
+        "timeZone": "America/New_York"
+      },
+      "iCalUID": "ana-deep-work-0312@example.com",
+      "sequence": 0,
+      "eventType": "default",
+      "transparency": "transparent",
+      "reminders": { "useDefault": true }
+    }
+  ]
+}

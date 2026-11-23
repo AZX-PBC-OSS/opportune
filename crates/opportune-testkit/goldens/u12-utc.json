@@ -1,0 +1,167 @@
+{
+  "id": "u12",
+  "use_case": "U12",
+  "zone": "UTC",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "candidates": [
+        "2027-06-14T09:00Z",
+        "2027-06-14T09:30Z",
+        "2027-06-14T10:00Z",
+        "2027-06-14T10:30Z",
+        "2027-06-14T11:00Z",
+        "2027-06-14T11:30Z",
+        "2027-06-15T09:00Z",
+        "2027-06-15T09:30Z",
+        "2027-06-15T10:00Z",
+        "2027-06-15T10:30Z",
+        "2027-06-15T11:00Z",
+        "2027-06-15T11:30Z"
+      ],
+      "display_zone": "UTC",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "ana"
+              }
+            ]
+          },
+          "tags": [
+            "interview/front-end"
+          ],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T09:00Z",
+        "2027-06-15T12:00Z"
+      ],
+      "zone": "UTC"
+    },
+    "now": "2027-06-14T00:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T07:00Z",
+              "2027-06-14T07:30Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview/front-end"
+            ]
+          },
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-15T07:00Z",
+              "2027-06-15T07:30Z"
+            ],
+            "status": "busy",
+            "tags": [
+              "interview"
+            ]
+          }
+        ],
+        "id": "ana",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-18:00"
+            ],
+            "mon": [
+              "09:00-18:00"
+            ],
+            "sat": [
+              "09:00-18:00"
+            ],
+            "sun": [
+              "09:00-18:00"
+            ],
+            "thu": [
+              "09:00-18:00"
+            ],
+            "tue": [
+              "09:00-18:00"
+            ],
+            "wed": [
+              "09:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "interview_day",
+        "kind": "cap",
+        "params": {
+          "count": {
+            "tag": "interview"
+          },
+          "limit": 2,
+          "measure": "count",
+          "per": "each",
+          "period": "day",
+          "week_starts": "mon",
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "frontend_day",
+        "kind": "cap",
+        "params": {
+          "count": {
+            "tag": "interview/front-end"
+          },
+          "limit": 1,
+          "measure": "count",
+          "per": "each",
+          "period": "day",
+          "week_starts": "mon",
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T09:00Z\",\"end\":\"2027-06-15T09:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T09:30Z\",\"end\":\"2027-06-15T10:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T10:00Z\",\"end\":\"2027-06-15T10:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T10:30Z\",\"end\":\"2027-06-15T11:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T11:00Z\",\"end\":\"2027-06-15T11:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T11:30Z\",\"end\":\"2027-06-15T12:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":0},{\"date\":\"2027-06-15\",\"offers\":6}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T09:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"frontend_day\",\"tags\":[],\"params\":{\"used\":1,\"limit\":1,\"bucket\":\"2027-06-14\"}}]},{\"start\":\"2027-06-14T09:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"frontend_day\",\"tags\":[],\"params\":{\"used\":1,\"limit\":1,\"bucket\":\"2027-06-14\"}}]},{\"start\":\"2027-06-14T10:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"frontend_day\",\"tags\":[],\"params\":{\"used\":1,\"limit\":1,\"bucket\":\"2027-06-14\"}}]},{\"start\":\"2027-06-14T10:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"frontend_day\",\"tags\":[],\"params\":{\"used\":1,\"limit\":1,\"bucket\":\"2027-06-14\"}}]},{\"start\":\"2027-06-14T11:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"frontend_day\",\"tags\":[],\"params\":{\"used\":1,\"limit\":1,\"bucket\":\"2027-06-14\"}}]},{\"start\":\"2027-06-14T11:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"cap_reached\",\"rule\":\"frontend_day\",\"tags\":[],\"params\":{\"used\":1,\"limit\":1,\"bucket\":\"2027-06-14\"}}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

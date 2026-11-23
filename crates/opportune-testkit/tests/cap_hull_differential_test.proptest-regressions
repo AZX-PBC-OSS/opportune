@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 21eb4ed6e0c2e0a688e053c7b905fb8ec0affce760c16c2d7e52615c4c814cd3 # shrinks to period = Day, week_starts = Monday, home = "America/Los_Angeles", leg = "Europe/London", after = 60, as_occurrence = false, keyed = false

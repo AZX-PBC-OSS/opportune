@@ -1,0 +1,47 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('bo%40example.com')/calendarView",
+  "value": [
+    {
+      "@odata.etag": "W/\"DwAAABYAAAB9k3z1AAAAAAAB\"",
+      "id": "AAMkAGI2THBBB-interview-0900",
+      "subject": "Interview: front-end round",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "occurrence",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E00800000000INTERVIEW0900",
+      "responseStatus": { "response": "accepted", "time": "2027-03-01T09:10:00Z" },
+      "start": { "dateTime": "2027-03-09T15:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T16:00:00.0000000", "timeZone": "UTC" },
+      "categories": ["Interview"],
+      "singleValueExtendedProperties": [
+        {
+          "id": "String {a5d0c4e2-7b1f-4c9a-9e3d-2f8b6c1a4e70} Name opportune.tags",
+          "value": "interview/front-end"
+        }
+      ]
+    },
+    {
+      "@odata.etag": "W/\"DwAAABYAAAB9k3z1AAAAAAAC\"",
+      "id": "AAMkAGI2THBBB-interview-1000",
+      "subject": "Interview: front-end round",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "occurrence",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E00800000000INTERVIEW1000",
+      "responseStatus": { "response": "accepted", "time": "2027-03-01T09:11:00Z" },
+      "start": { "dateTime": "2027-03-10T15:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-10T16:00:00.0000000", "timeZone": "UTC" },
+      "categories": ["Interview"],
+      "singleValueExtendedProperties": [
+        {
+          "id": "String {a5d0c4e2-7b1f-4c9a-9e3d-2f8b6c1a4e70} Name opportune.tags",
+          "value": "interview/front-end"
+        }
+      ]
+    }
+  ]
+}

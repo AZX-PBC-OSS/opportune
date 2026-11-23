@@ -1,0 +1,9 @@
+{
+  "distribution": "opportune",
+  "module": "opportune._opportune",
+  "requires_python": ">=3.12",
+  "license_expression": "MIT OR Apache-2.0",
+  "license_files": ["LICENSE-MIT", "LICENSE-APACHE"],
+  "type_marker": "py.typed",
+  "stub": "_opportune.pyi"
+}

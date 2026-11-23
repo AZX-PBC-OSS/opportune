@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 55cdc930c78806d7b2076f736b203e7218065693e6afc8c1ced3e7e65ddcdf95 # shrinks to case = BlackoutCase { zone: Event, zones: ZonePlan { home: "America/Los_Angeles", periods: [("Europe/London", 2027-04-03T00:00Z, 2027-04-03T23:01Z)] }, event: "America/Los_Angeles", named: "America/Los_Angeles", spans: [((2027-04-04, 00:00), (2027-04-04, 00:01))], from: 2027-04-03T00:00Z, until: 2027-04-06T00:00Z }
+cc c2f82d5274cf141fa5b25925d18b888f28ce5d1eccf1e66f2932aa5e2766e858 # shrinks to case = WindowCase { zone: Event, zones: ZonePlan { home: "America/Los_Angeles", periods: [] }, event: "Europe/London", named: "America/Los_Angeles", weekly: [], dates: [(2027-03-14, 2027-03-14, [(0, 1)])], from: 2027-03-13T00:00Z, until: 2027-03-16T00:00Z }
+cc b8291c6202906c1c1aab096737974ac26884c333bdf85de31a6a674e2fe49bdc # shrinks to case = WindowCase { zone: Participant, zones: ZonePlan { home: "America/Los_Angeles", periods: [] }, event: "America/Los_Angeles", named: "America/Los_Angeles", weekly: [], dates: [(2027-03-14, 2027-03-14, [(120, 181)])], from: 2027-03-13T00:00Z, until: 2027-03-14T10:01Z }
+cc bac9b8fdc5f91f57b2d5569fa8e90d9a7df5b80660f1566cbf3b377ff7d9202c # shrinks to case = WindowCase { zone: Participant, zones: ZonePlan { home: "Asia/Kolkata", periods: [("America/Los_Angeles", 2027-03-13T00:00Z, 2027-03-13T00:01Z)] }, event: "America/Los_Angeles", named: "America/Los_Angeles", weekly: [], dates: [(2027-03-14, 2027-03-14, [(0, 1274)])], from: 2027-03-13T00:00Z, until: 2027-03-14T00:01Z }
+cc d44439b1b5282b38b1e9bd1780c9b7ce9bd95c79fc2443c4132d2195aa711656 # shrinks to case = BlackoutCase { zone: Participant, zones: ZonePlan { home: "Europe/London", periods: [("America/Los_Angeles", 2027-03-13T00:00Z, 2027-03-13T00:01Z)] }, event: "America/Los_Angeles", named: "America/Los_Angeles", spans: [((2027-03-14, 00:00), (2027-03-14, 00:01))], from: 2027-03-13T00:00Z, until: 2027-03-14T00:01Z }

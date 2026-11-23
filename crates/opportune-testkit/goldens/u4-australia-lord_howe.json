@@ -1,0 +1,159 @@
+{
+  "id": "u4",
+  "use_case": "U4",
+  "zone": "Australia/Lord_Howe",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "Australia/Lord_Howe",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "at_least": 1,
+                "of": {
+                  "tag": "team/sales"
+                }
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-13T22:30Z",
+        "2027-06-14T01:30Z"
+      ],
+      "zone": "Australia/Lord_Howe"
+    },
+    "now": "2027-06-13T13:30Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-13T23:30Z",
+              "2027-06-14T00:30Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "ana",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "team/sales"
+        ],
+        "zone": "Australia/Lord_Howe",
+        "zone_periods": []
+      },
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:00Z",
+              "2027-06-14T00:30Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "bo",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "team/sales"
+        ],
+        "zone": "Australia/Lord_Howe",
+        "zone_periods": []
+      },
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-13T22:30Z",
+              "2027-06-13T23:30Z"
+            ],
+            "status": "busy",
+            "tags": []
+          },
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T00:00Z",
+              "2027-06-14T00:30Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "cy",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "team/sales"
+        ],
+        "zone": "Australia/Lord_Howe",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-18:00"
+            ],
+            "mon": [
+              "09:00-18:00"
+            ],
+            "sat": [
+              "09:00-18:00"
+            ],
+            "sun": [
+              "09:00-18:00"
+            ],
+            "thu": [
+              "09:00-18:00"
+            ],
+            "tue": [
+              "09:00-18:00"
+            ],
+            "wed": [
+              "09:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {
+      "bo": 2,
+      "cy": 5
+    }
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-13T22:30Z\",\"end\":\"2027-06-13T23:00Z\",\"eligible\":[[\"ana\",\"bo\"]],\"assignment\":[[\"bo\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-13T23:00Z\",\"end\":\"2027-06-13T23:30Z\",\"eligible\":[[\"ana\",\"bo\"]],\"assignment\":[[\"bo\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-13T23:30Z\",\"end\":\"2027-06-14T00:00Z\",\"eligible\":[[\"bo\",\"cy\"]],\"assignment\":[[\"cy\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T00:30Z\",\"end\":\"2027-06-14T01:00Z\",\"eligible\":[[\"ana\",\"bo\",\"cy\"]],\"assignment\":[[\"cy\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T01:00Z\",\"end\":\"2027-06-14T01:30Z\",\"eligible\":[[\"ana\",\"bo\",\"cy\"]],\"assignment\":[[\"cy\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":5}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T00:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"blocked\",\"tags\":[]},{\"participant\":\"bo\",\"code\":\"blocked\",\"tags\":[]},{\"participant\":\"cy\",\"code\":\"blocked\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

@@ -1,0 +1,52 @@
+[package]
+name = "opportune-json"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Wire types, validating conversions, schema and upgrade for the opportune engine."
+readme = "README.md"
+keywords = ["calendar", "json", "schema", "serialization", "scheduling"]
+categories = ["date-and-time", "encoding"]
+# Publishable for Rust consumers of the wire layer.
+#
+# serde, serde_json and schemars are confined to this crate — the core stays free
+# of serde.
+
+[dependencies]
+# The `>=` floor is not decoration: cargo-deny's `wildcards = "deny"` rejects a
+# version-free path dependency. The upper bound is what makes the published
+# requirement say which compatible releases it accepts rather than leaving the
+# next release train implicit: a consumer on 0.1.x cannot silently pick up 0.2.0.
+# Default features are off so this crate's own `bundled-tzdb` feature decides. That
+# feature is off too: no production path in this crate reads a database — the
+# facade entry points take an engine the caller built — so a consumer embedding the
+# wire types must not carry ~400 KB of zone data it never reads. The feature exists
+# for the facade examples and the suites here, and for an adopter that wants the
+# core's default engine reachable through this crate's dependency.
+opportune = { path = "../opportune", version = ">=0.1.0, <0.2.0", default-features = false }
+schemars = { version = "1.2.3", optional = true }
+serde.workspace = true
+serde_json.workspace = true
+# serde discards the JSON path it was reading when a document fails to
+# deserialize; this keeps it, so a rejection can name the field at fault. It
+# depends on serde and itoa only, and it is as `wasm32`-clean as serde_json.
+serde_path_to_error = "0.1.20"
+
+[lints]
+workspace = true
+
+[features]
+# Default on: schema generation is part of the wire layer's contract for most
+# callers. It exists as a feature so a bundle-size-constrained consumer — a browser
+# build, say — can compile schemars out of its own graph.
+default = ["schema"]
+schema = ["dep:schemars"]
+# The same passthrough `opportune` declares: on, `Engine::builder().build()` uses
+# the database compiled into the binary. Off, which is the default, because the wire
+# layer itself never reads one; the facade examples and the suites are the callers
+# that turn it on.
+bundled-tzdb = ["opportune/bundled-tzdb"]

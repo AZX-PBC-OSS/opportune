@@ -1,0 +1,80 @@
+{
+  "name": "opportune",
+  "version": "0.1.0",
+  "description": "Availability scheduling: WASM binding of the opportune engine for JavaScript and TypeScript.",
+  "author": "AZX, PBC. <oss@azx.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AZX-PBC-OSS/opportune.git"
+  },
+  "homepage": "https://github.com/AZX-PBC-OSS/opportune/tree/main/crates/opportune-wasm/js#readme",
+  "keywords": [
+    "availability",
+    "scheduling",
+    "calendar",
+    "booking",
+    "time-zones",
+    "wasm"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "bun": ">=1.4.2",
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.20.0",
+  "sideEffects": [
+    "./dist/browser.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/browser.js",
+      "edge-light": "./dist/browser.js",
+      "worker": "./dist/browser.js",
+      "node": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./presets": {
+      "types": "./dist/presets-entry.d.ts",
+      "default": "./dist/presets-entry.js"
+    },
+    "./adapters/graph": {
+      "types": "./dist/adapters/graph.d.ts",
+      "browser": "./dist/browser.js",
+      "edge-light": "./dist/browser.js",
+      "worker": "./dist/browser.js",
+      "node": "./dist/adapters/graph.js",
+      "default": "./dist/adapters/graph.js"
+    },
+    "./adapters/google": {
+      "types": "./dist/adapters/google.d.ts",
+      "browser": "./dist/browser.js",
+      "edge-light": "./dist/browser.js",
+      "worker": "./dist/browser.js",
+      "node": "./dist/adapters/google.js",
+      "default": "./dist/adapters/google.js"
+    },
+    "./package.json": "./package.json",
+    "./schema.json": "./schema.json"
+  },
+  "files": [
+    "dist",
+    "schema.json",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node bin/bundle-module.mjs",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "json-schema-to-typescript": "^15.0.4",
+    "typescript": "^5.9.0"
+  }
+}

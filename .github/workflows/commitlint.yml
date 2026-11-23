@@ -1,0 +1,49 @@
+# Enforces Conventional Commits on the pull request title, which is what release-please
+# parses to choose the next version and write the CHANGELOG entry. Without this gate a
+# PR titled "update stuff" merges cleanly and produces no release at all.
+
+name: commitlint
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
+        # Defensive, not required: Dependabot titles come from dependabot.yml's
+        # commit-message prefixes and release-please titles its own PR
+        # "chore(main): release X.Y.Z", so both are already conventional. Neither bot can
+        # edit a title in response to this gate, so a mismatch would deadlock the PR.
+        if: github.actor != 'dependabot[bot]' && github.actor != 'github-actions[bot]'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            chore
+            ci
+            build
+            revert
+          subjectPattern: ^[a-z].+
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            didn't match the configured pattern. Please ensure that the subject
+            starts with a lowercase letter.

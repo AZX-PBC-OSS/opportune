@@ -1,0 +1,100 @@
+{
+  "id": "u19",
+  "use_case": "U19",
+  "zone": "UTC",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "UTC",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "ana"
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T00:00Z",
+        "2027-06-14T06:00Z"
+      ],
+      "zone": "UTC"
+    },
+    "now": "2027-06-14T00:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "ana",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      },
+      {
+        "id": "cand",
+        "kind": "person",
+        "role": "attendee",
+        "tags": [],
+        "zone": "Asia/Kolkata",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "attendee_hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "08:00-19:00"
+            ],
+            "mon": [
+              "08:00-19:00"
+            ],
+            "sat": [
+              "08:00-19:00"
+            ],
+            "sun": [
+              "08:00-19:00"
+            ],
+            "thu": [
+              "08:00-19:00"
+            ],
+            "tue": [
+              "08:00-19:00"
+            ],
+            "wed": [
+              "08:00-19:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "ids": [
+            "cand"
+          ]
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T02:30Z\",\"end\":\"2027-06-14T03:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:00Z\",\"end\":\"2027-06-14T03:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:30Z\",\"end\":\"2027-06-14T04:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T04:00Z\",\"end\":\"2027-06-14T04:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T04:30Z\",\"end\":\"2027-06-14T05:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T05:00Z\",\"end\":\"2027-06-14T05:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T05:30Z\",\"end\":\"2027-06-14T06:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":7}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T00:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"attendee_hours\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]},{\"start\":\"2027-06-14T00:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"attendee_hours\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]},{\"start\":\"2027-06-14T01:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"attendee_hours\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]},{\"start\":\"2027-06-14T01:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"attendee_hours\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]},{\"start\":\"2027-06-14T02:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"attendee_hours\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

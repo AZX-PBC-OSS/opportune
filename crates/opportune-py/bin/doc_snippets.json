@@ -1,0 +1,240 @@
+{
+  "pages": [
+    "README.md",
+    "docs/index.md",
+    "docs/api.md",
+    "docs/wasm.md",
+    "docs/recipes.md",
+    "docs/crates.md",
+    "docs/dependencies.md",
+    "docs/design.md",
+    "crates/opportune-wasm/js/README.md"
+  ],
+  "fixtures": "crates/opportune-adapters/tests/fixtures",
+  "typescript_package": "crates/opportune-wasm/js",
+  "snippets": [
+    {
+      "id": "readme-python",
+      "page": "README.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "readme-ts",
+      "page": "README.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "index-python-version",
+      "page": "docs/index.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "api-python-quickstart",
+      "page": "docs/api.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "api-python-limits",
+      "page": "docs/api.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "api-python-fastapi-lifespan",
+      "page": "docs/api.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "api-python-stored-rules",
+      "page": "docs/api.md",
+      "language": "python",
+      "mode": "check"
+    },
+    {
+      "id": "api-python-adapter-helper",
+      "page": "docs/api.md",
+      "language": "python",
+      "mode": "run",
+      "fixtures": {
+        "calendar_view_payload": "graph/calendar_view_ana.json"
+      }
+    },
+    {
+      "id": "api-python-error-handlers",
+      "page": "docs/api.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "wasm-ts-quickstart",
+      "page": "docs/wasm.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "wasm-ts-errors",
+      "page": "docs/wasm.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "wasm-ts-http-errors",
+      "page": "docs/wasm.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "wasm-ts-limits",
+      "page": "docs/wasm.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "wasm-ts-adapters",
+      "page": "docs/wasm.md",
+      "language": "ts",
+      "mode": "run",
+      "fixtures": {
+        "calendar_view_payload": "graph/calendar_view_ana.json",
+        "working_hours_payload": "graph/working_hours.json"
+      }
+    },
+    {
+      "id": "wasm-ts-available-only",
+      "page": "docs/wasm.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "personal-link-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "personal-link-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "panel-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "panel-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "rest-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "rest-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "booth-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "booth-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "travel-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "travel-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "layered-policy-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "layered-policy-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "team-room-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "team-room-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "panel-reschedule-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "panel-reschedule-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "providers-python",
+      "page": "docs/recipes.md",
+      "language": "python",
+      "mode": "run"
+    },
+    {
+      "id": "providers-ts",
+      "page": "docs/recipes.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "npm-ts-quickstart",
+      "page": "crates/opportune-wasm/js/README.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "npm-ts-errors",
+      "page": "crates/opportune-wasm/js/README.md",
+      "language": "ts",
+      "mode": "run"
+    },
+    {
+      "id": "npm-ts-runtime",
+      "page": "crates/opportune-wasm/js/README.md",
+      "language": "ts",
+      "mode": "check"
+    }
+  ]
+}

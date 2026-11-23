@@ -1,0 +1,73 @@
+[package]
+name = "opportune-adapters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Graph and Google calendar conversions into opportune domain types."
+readme = "README.md"
+keywords = ["calendar", "microsoft-graph", "google-calendar", "adapter", "scheduling"]
+categories = ["date-and-time", "parsing"]
+# This target compiles a snippet from the core crate's test corpus, which is one
+# directory up and outside a `.crate`: the package cannot resolve the `include!`,
+# so shipping the target would make the published source's suite unbuildable while
+# `cargo package`'s verification — library only — stayed green.
+exclude = ["tests/docs_snippets.rs"]
+# Publishable for Rust consumers.
+
+[dependencies]
+# The `>=` floor is not decoration: cargo-deny's `wildcards = "deny"` rejects a
+# version-free path dependency. The upper bound names the compatible release train
+# the published requirement accepts, so a consumer on 0.1.x cannot silently pick up
+# 0.2.0.
+# Default features are off so this crate's own `bundled-tzdb` feature decides, rather
+# than the core's default leaking in. The feature is default-on because the
+# provider-less JSON entry points resolve zone names against that database; an
+# adopter that supplies its own turns it off with `default-features = false` and
+# never carries ~400 KB of zone data it does not read.
+opportune = { path = "../opportune", version = ">=0.1.0, <0.2.0", default-features = false }
+# The wire envelopes reuse the wire layer's block and rule shapes, so a binding
+# generates one model set rather than two spellings of the same value. Default
+# features are off: `schemars` belongs to the `schema` feature alone, and a
+# bundle-size-constrained consumer compiles it out of the graph.
+opportune-json = { path = "../opportune-json", version = ">=0.1.0, <0.2.0", default-features = false, optional = true }
+schemars = { version = "1.2.3", optional = true }
+# Only the provider adapters and the JSON envelopes read a document, so serde is a
+# provider feature rather than an unconditional dependency.
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror.workspace = true
+# Kept on its default features deliberately: its default `std` feature provides
+# the name parsing the `windows-zones` feature needs, and turning defaults off
+# removes that parsing. It is the one dependency whose licence (Unicode-DFS-2016
+# for the CLDR data) sits beyond the standard Rust ecosystem's, so it is
+# optional and feature-gated.
+windows-timezones = { version = "0.5.1", optional = true }
+
+[lints]
+workspace = true
+
+[features]
+# Default on: real Graph payloads carry Windows zone names, so correctness should
+# be the default, and so should the bundled database the provider-less JSON entry
+# points resolve those names against. Strict adopters can compile the CLDR data —
+# and its Unicode-DFS-2016 licence — out, and can keep the bundled zone data out of
+# their graph by taking the `*_with_db` conversions instead.
+default = ["graph", "google", "windows-zones", "bundled-tzdb"]
+graph = ["dep:serde", "dep:serde_json"]
+# Google reads its payloads with serde, so the feature wires the document
+# dependencies in rather than leaving a module without a parser.
+google = ["dep:serde", "dep:serde_json"]
+# JSON envelopes for the bindings. Off by default: a Rust consumer of the domain
+# API needs neither the wire types nor `opportune-json`.
+json = ["dep:serde", "dep:serde_json", "dep:opportune-json"]
+# The codegen schemas, on top of the envelopes the bindings consume.
+schema = ["json", "dep:schemars", "opportune-json/schema"]
+windows-zones = ["dep:windows-timezones"]
+# The JSON entry points that resolve zone names against the database compiled into
+# the binary, with no database of the caller's own. Off, the `*_with_db` variants
+# remain: a caller that holds a database passes it.
+bundled-tzdb = ["opportune/bundled-tzdb"]

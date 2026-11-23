@@ -1,0 +1,65 @@
+[package]
+name = "opportune-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WASM binding for the opportune engine."
+# Distributed as an npm package (generated TypeScript types, bundle-size budget),
+# not on crates.io. `publish = false` because a crates.io name, once taken, cannot
+# be released — an accidental `cargo publish --workspace` would otherwise squat it
+# with a binding that has no crate documentation to read.
+publish = false
+
+[lib]
+# `cdylib` is the module wasm-pack builds; `rlib` is what the host-target tests
+# link against, so the entry helpers are exercised without a wasm runtime.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The `>=` floor is not decoration: cargo-deny's `wildcards = "deny"` rejects a
+# version-free path dependency. The upper bound keeps every intra-workspace
+# requirement inside one release train; a release crossing 0.2.0 moves it.
+opportune = { path = "../opportune", version = ">=0.1.0, <0.2.0" }
+# The published module reads and writes the wire types directly, so schema generation
+# is compiled out: `schemars` stays out of the package a consumer downloads.
+opportune-json = { path = "../opportune-json", version = ">=0.1.0, <0.2.0", default-features = false }
+# The Graph and Google payload conversions cross the boundary as JSON too, so the
+# binding exposes the adapter entry points rather than re-implementing them here.
+# Default features are off and the providers and the bundled database are named
+# explicitly: the Windows zone mapping is the one dependency only this crate's own
+# `windows-zones` feature reaches, which is what keeps it — and its
+# Unicode-DFS-2016 licence — out of a stripped build, and `bundled-tzdb` is what a
+# module with no filesystem and no caller-supplied database resolves zones against.
+opportune-adapters = { path = "../opportune-adapters", version = ">=0.1.0, <0.2.0", default-features = false, features = [
+  "graph",
+  "google",
+  "json",
+  "bundled-tzdb",
+] }
+# The failure a JS caller receives is one JSON document, so the payload is built
+# with the same serialiser the wire layer writes its answers with.
+serde_json.workspace = true
+wasm-bindgen = "0.2.130"
+
+[features]
+# On by default: real Graph payloads carry Windows zone names, so a bundle that
+# could not resolve them would answer `unavailable` carrying `zone_unknown` for
+# the whole calendar — the mailbox becomes unknown and nothing can be booked in
+# it, rather than the events being dropped and the time reading as free.
+default = ["windows-zones"]
+windows-zones = ["opportune-adapters/windows-zones"]
+
+# The release module is optimised for size: `-Oz` shrinks the binary at the
+# cost of the extra inlining `-O3` would do, which is the right trade for code that
+# ships over the network and runs a handful of searches per call. `bulk-memory` is
+# enabled because `wasm32-unknown-unknown` emits `memory.copy`/`memory.fill` by
+# default and this Binaryen rejects those instructions unless told the module may
+# use them; without the flag wasm-pack's release build fails validation.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-bulk-memory"]
+
+[lints]
+workspace = true

@@ -1,0 +1,96 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Optional: a tag created with GITHUB_TOKEN cannot start the publish workflow.
+      # Configure the App ID and key as repository variables and secrets to let the
+      # release tag trigger publishing automatically.
+      - name: Mint a GitHub App token
+        id: app-token
+        if: ${{ vars.RELEASE_PLEASE_APP_ID != '' }}
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+
+      # release-please's `simple` strategy bumps version.txt and the workspace
+      # Cargo.toml but touches no lockfile, so Cargo.lock still records the old
+      # workspace member versions and every --locked build on the release PR and the
+      # tag would fail. `cargo metadata` reconciles it. The Python project's
+      # `uv.lock` is the second generated lockfile in the bumped tree: `uv run
+      # --locked` compares it against the release branch's sources, so it is
+      # regenerated in the same step rather than left for the Python lane to fail
+      # on. Both are pushed together before a reviewer sees the PR.
+      #
+      # `prs_created` is the only PR output the action sets, and it is true whenever
+      # release-please opened *or* revised the release PR: it reports the pull requests
+      # `createPullRequests()` returned, and that call returns an existing PR it just
+      # updated as well as one it created. It is false only when the PR was left
+      # untouched, which is exactly when nothing was bumped and no reconciliation is owed.
+      - name: Check out the release branch
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release-please--branches--main
+          # The token that created the PR is the only one that can push to its branch.
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install uv
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Reconcile the lockfiles with the bumped version
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        run: |
+          cargo metadata --format-version=1 > /dev/null
+          uv lock --project crates/opportune-py
+
+          changed=false
+          if ! git diff --quiet Cargo.lock; then
+            changed=true
+          fi
+          if ! git diff --quiet crates/opportune-py/uv.lock; then
+            changed=true
+          fi
+          if [ "${changed}" = "false" ]; then
+            echo "Cargo.lock and uv.lock already match the bumped version"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock crates/opportune-py/uv.lock
+          git commit -m "chore: reconcile the lockfiles with the release version"
+          git push
+
+      - name: Warn when the tag cannot trigger publishing
+        if: ${{ steps.release.outputs.release_created == 'true' && steps.app-token.outputs.token == '' }}
+        env:
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: |
+          echo "::warning::${TAG_NAME} was tagged with GITHUB_TOKEN, which cannot start workflows; run the publish workflow against that tag."

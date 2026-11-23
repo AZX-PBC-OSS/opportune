@@ -1,0 +1,61 @@
+[package]
+name = "opportune"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Calendar availability and scheduling calculations across constraints."
+# The SPDX expression, not `license-file`: crates.io badges it, downstream `cargo deny`
+# recognises it without a per-crate allowance, and cargo auto-includes the crate's own
+# LICENSE copies in the package. `license`/`license-file` are mutually exclusive and a
+# cross-directory `include` entry is silently dropped, so the text travels as copies —
+# `make lint` and CI's lint job assert both copies match the repository root's files.
+license.workspace = true
+readme = "README.md"
+keywords = ["calendar", "scheduling", "availability"]
+categories = ["date-and-time"]
+# The documentation test quotes this repository's pages, which a `.crate` does not
+# carry: the package holds this directory alone, so the target has nothing to
+# `include_str!` and the crate's whole suite stops compiling from the published
+# source. `cargo package` verifies the library and never the tests, so it would
+# ship unnoticed. The snippet corpus is only that target's input, so it travels
+# with it: the in-repository gates still compile and run both.
+exclude = ["tests/docs_snippets.rs", "tests/snippets"]
+
+[lints]
+workspace = true
+
+[features]
+# Default on: the bundled ~400 KB tz database means an `Engine` needs no
+# caller-supplied database directory. Without it, jiff's `tzdb-bundle-always`
+# is off too, and the engine only reaches zone data through jiff's zoneinfo and
+# concatenated-database readers (native) or a directory the caller loads.
+default = ["bundled-tzdb"]
+bundled-tzdb = ["dep:jiff-tzdb", "jiff/tzdb-bundle-always"]
+
+[dependencies]
+# Each library sits behind one internal module; nothing here reaches the public API.
+# Default features are off so the ambient system time zone can never creep into
+# the core: only the feature sets named here are available, and the wasm32 set
+# below is the sole definition of what compiles there.
+jiff = { version = "1.0.1", default-features = false, features = [
+  "alloc",
+  "perf-inline",
+] }
+thiserror.workspace = true # typed errors with stable codes
+# The bundled tz database, compiled into the binary only when `bundled-tzdb` is on.
+jiff-tzdb = { version = "1.0.0", optional = true }
+
+# Native targets add std and the on-disk tz database readers; wasm32 has no
+# filesystem or ambient zone database, so they stay off there. Declaring the
+# target-specific dependency separately (rather than one shared feature list)
+# is what keeps the wasm32 graph std-free: features across the two declarations
+# unify per target, and only the matching declaration applies.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+jiff = { version = "1.0.1", default-features = false, features = [
+  "std",
+  "tzdb-zoneinfo",
+  "tzdb-concatenated",
+] }

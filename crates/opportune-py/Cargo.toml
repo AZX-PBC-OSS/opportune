@@ -1,0 +1,63 @@
+[package]
+name = "opportune-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python bindings for the opportune crate."
+publish = false
+
+[lib]
+name = "_opportune"
+# cdylib only: this crate exists to be built into the Python extension module.
+crate-type = ["cdylib"]
+
+[dependencies]
+# The version requirement is not decoration: cargo-deny's `wildcards = "deny"`
+# rejects a version-free path dependency. The upper bound keeps every
+# intra-workspace requirement inside one release train, as a published manifest
+# would ask for; a release crossing 0.2.0 moves it.
+opportune = { path = "../opportune", version = ">=0.1.0, <0.2.0" }
+# Bindings cross the language boundary with JSON only; opportune-json owns the wire
+# types and conversions the JSON entry points are built on. `default-features = false`
+# keeps `schemars` out of the wheel: the Python binding reads and writes the wire
+# types directly, and schema generation stays a consumer of the Rust crate.
+opportune-json = { path = "../opportune-json", version = ">=0.1.0, <0.2.0", default-features = false }
+# The Graph and Google payload conversions cross the boundary as JSON too, so the
+# binding exposes the adapter entry points rather than re-implementing them in
+# Python. Default features are off and the providers and the bundled database are
+# named explicitly: the Windows zone mapping is the one dependency only this
+# crate's own `windows-zones` feature reaches, which is what keeps it out of a
+# minimal build, and `bundled-tzdb` keeps the adapter's bundled-database entry
+# points — and the zone data the shared engine needs — in the wheel.
+opportune-adapters = { path = "../opportune-adapters", version = ">=0.1.0, <0.2.0", default-features = false, features = [
+  "graph",
+  "google",
+  "json",
+  "bundled-tzdb",
+] }
+# abi3-py312 gives one wheel per platform for every supported Python release
+# (pyproject.toml's requires_python). maturin >= 1.9.4 sets
+# PYO3_BUILD_EXTENSION_MODULE for wheel builds, so no `extension-module` feature
+# is needed and `cargo test` still links libpython.
+pyo3 = { version = "0.30.1", features = ["abi3-py312"] }
+
+[dev-dependencies]
+# The tests read the JSON documents the extension returns to assert on their
+# fields, which is what a Python caller does with them.
+serde_json.workspace = true
+
+[features]
+# On by default: real Graph payloads carry Windows zone names. `windows-zones`
+# maps a Windows name through the CLDR table to the IANA name the engine reads;
+# with it off, `opportune-adapters` answers `zone_unknown` for those names and a
+# wheel answers `unavailable` for the whole calendar — the mailbox becomes unknown
+# and nothing can be booked in it, rather than the events being dropped and the
+# time reading as free.
+default = ["windows-zones"]
+windows-zones = ["opportune-adapters/windows-zones"]
+
+[lints]
+workspace = true

@@ -1,0 +1,3 @@
+Not a TZif file: this fixture stands in for a corrupted or misconfigured time
+zone database directory, which must be rejected at construction rather than
+resolved lazily into an unknown zone.
