@@ -75,6 +75,6 @@
   "devDependencies": {
     "@types/node": "^26.0.0",
     "json-schema-to-typescript": "^15.0.4",
-    "typescript": "^5.9.0"
+    "typescript": "^7.0.2"
   }
 }
