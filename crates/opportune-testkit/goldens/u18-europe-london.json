@@ -1,0 +1,90 @@
+{
+  "id": "u18",
+  "use_case": "U18",
+  "zone": "Europe/London",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "candidates": [
+        "2027-06-14T07:45Z",
+        "2027-06-14T09:15Z",
+        "2027-06-14T14:45Z",
+        "2027-06-14T15:50Z"
+      ],
+      "display_zone": "Europe/London",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "rich"
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-13T23:00Z",
+        "2027-06-14T23:00Z"
+      ],
+      "zone": "Europe/London"
+    },
+    "now": "2027-06-13T11:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "rich",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "Europe/London",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-17:00"
+            ],
+            "mon": [
+              "09:00-17:00"
+            ],
+            "thu": [
+              "09:00-17:00"
+            ],
+            "tue": [
+              "09:00-17:00"
+            ],
+            "wed": [
+              "09:00-17:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T09:15Z\",\"end\":\"2027-06-14T09:45Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T14:45Z\",\"end\":\"2027-06-14T15:15Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":2}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T07:45Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T15:50Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

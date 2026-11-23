@@ -1,0 +1,106 @@
+{
+  "id": "truncated-offers",
+  "use_case": "truncation",
+  "zone": "America/Los_Angeles",
+  "request": {
+    "calendars": {},
+    "goal": {
+      "display_zone": "America/Los_Angeles",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "rich"
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T07:00Z",
+        "2027-06-19T07:00Z"
+      ],
+      "zone": "America/Los_Angeles"
+    },
+    "limit": 2,
+    "now": "2027-06-14T15:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "rich",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "America/Los_Angeles",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "business_hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-17:00"
+            ],
+            "mon": [
+              "09:00-17:00"
+            ],
+            "thu": [
+              "09:00-17:00"
+            ],
+            "tue": [
+              "09:00-17:00"
+            ],
+            "wed": [
+              "09:00-17:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "buffers",
+        "kind": "clearance",
+        "params": {
+          "after": "10m",
+          "before": "10m",
+          "min_gap": "0h"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "min_notice",
+        "kind": "lead_time",
+        "params": {
+          "min": "4h"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T19:00Z\",\"end\":\"2027-06-14T19:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T19:30Z\",\"end\":\"2027-06-14T20:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":10},{\"date\":\"2027-06-15\",\"offers\":16},{\"date\":\"2027-06-16\",\"offers\":16},{\"date\":\"2027-06-17\",\"offers\":16},{\"date\":\"2027-06-18\",\"offers\":16}],\"truncated\":true,\"excluded\":[],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

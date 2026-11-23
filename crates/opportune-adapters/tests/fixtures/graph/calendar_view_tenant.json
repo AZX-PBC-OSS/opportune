@@ -1,0 +1,175 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('ana%40example.com')/calendarView",
+  "value": [
+    {
+      "@odata.etag": "W/\"tenant-0001\"",
+      "id": "evt-free",
+      "subject": "Focus block that does not block",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "Free",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000001",
+      "start": { "dateTime": "2027-03-09T09:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T10:00:00.0000000", "timeZone": "UTC" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0002\"",
+      "id": "evt-tentative",
+      "subject": "Maybe",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "TENTATIVE",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000002",
+      "start": { "dateTime": "2027-03-09T10:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T11:00:00.0000000", "timeZone": "UTC" },
+      "categories": []
+    },
+    {
+      "@odata.etag": "W/\"tenant-0003\"",
+      "id": "evt-oof",
+      "subject": "Customer onsite",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "OOF",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000003",
+      "start": { "dateTime": "2027-03-09T11:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T12:00:00.0000000", "timeZone": "UTC" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0004\"",
+      "id": "evt-elsewhere",
+      "subject": "Working from the cafe",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "WorkingElsewhere",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000004",
+      "start": { "dateTime": "2027-03-09T12:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T13:00:00.0000000", "timeZone": "UTC" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0005\"",
+      "id": "evt-unknown",
+      "subject": "Status from a newer client",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "Unknown",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000005",
+      "start": { "dateTime": "2027-03-09T13:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T14:00:00.0000000", "timeZone": "UTC" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0006\"",
+      "id": "evt-cancelled",
+      "subject": "Cancelled planning",
+      "isAllDay": false,
+      "isCancelled": true,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000006",
+      "start": { "dateTime": "2027-03-09T15:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T16:00:00.0000000", "timeZone": "UTC" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0007\"",
+      "id": "evt-declined",
+      "subject": "Declined invitation",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000007",
+      "responseStatus": { "response": "Declined", "time": "2027-03-01T08:00:00Z" },
+      "start": { "dateTime": "2027-03-09T16:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T17:00:00.0000000", "timeZone": "UTC" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0008\"",
+      "id": "evt-draft",
+      "subject": "Undeclared meeting",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": true,
+      "type": "singleInstance",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000008",
+      "start": { "dateTime": "2027-03-09T17:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-09T18:00:00.0000000", "timeZone": "UTC" },
+      "categories": null
+    },
+    {
+      "@odata.etag": "W/\"tenant-0009\"",
+      "id": "evt-zero",
+      "subject": "Zero-length reminder",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000009",
+      "start": { "dateTime": "2027-03-10T10:00:30.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-10T10:00:30.0000000", "timeZone": "UTC" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0010\"",
+      "id": "evt-categories",
+      "subject": "Interview: platform round",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000010",
+      "start": { "dateTime": "2027-03-10T16:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-10T17:00:00.0000000", "timeZone": "UTC" },
+      "categories": ["Interview", "1:1 Sync!", "!!!", "Client Demo (Q3)!"],
+      "singleValueExtendedProperties": [
+        {
+          "id": "String {A5D0C4E2-7B1F-4C9A-9E3D-2F8B6C1A4E70} Name opportune.event_key",
+          "value": "booking-42"
+        },
+        {
+          "id": "String {A5D0C4E2-7B1F-4C9A-9E3D-2F8B6C1A4E70} Name opportune.tags",
+          "value": "team/sales interview/platform not:a:tag"
+        }
+      ]
+    },
+    {
+      "@odata.etag": "W/\"tenant-0011\"",
+      "id": "evt-windows-zone",
+      "subject": "Sync with the west coast",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000011",
+      "start": { "dateTime": "2027-03-09T09:00:00.0000000", "timeZone": "Pacific Standard Time" },
+      "end": { "dateTime": "2027-03-09T10:00:00.0000000", "timeZone": "Pacific Standard Time" }
+    },
+    {
+      "@odata.etag": "W/\"tenant-0012\"",
+      "id": "evt-fractional",
+      "subject": "Fractional seconds",
+      "isAllDay": false,
+      "isCancelled": false,
+      "isDraft": false,
+      "type": "singleInstance",
+      "showAs": "busy",
+      "iCalUId": "040000008200E00074C5B7101A82E0080000000000000012",
+      "start": { "dateTime": "2027-03-10T10:30:45.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2027-03-10T11:00:01.0000000", "timeZone": "UTC" }
+    }
+  ]
+}

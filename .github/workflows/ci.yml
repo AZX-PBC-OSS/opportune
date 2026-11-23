@@ -1,0 +1,659 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A superseded pull request is worth cancelling; a superseded push to main is not,
+  # because the cancelled run is the only record that its commit was checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Assert the bundled licence copies match the repository licences
+        # Every publishable crate carries its own copies of the root licence files because
+        # none may point at them: maturin rejects a licence glob that escapes the project
+        # directory, and cargo silently drops a cross-directory `include` entry. These are
+        # the copies that ship in the wheel and in each .crate, so `make lint` runs this
+        # same comparison locally and this step is the CI end of it.
+        run: |
+          set -euo pipefail
+          for file in LICENSE-MIT LICENSE-APACHE; do
+            for copy in "crates/opportune/${file}" "crates/opportune-json/${file}" \
+                        "crates/opportune-adapters/${file}" "crates/opportune-py/${file}" \
+                        "crates/opportune-wasm/js/${file}"; do
+              if ! cmp "${file}" "${copy}"; then
+                echo "::error::${copy} differs from ${file}; the published artefact ships the copy"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Assert the version sources and the toolchain pin agree
+        # `version.txt`, the root manifest, the npm package's manifest, its TypeScript
+        # `VERSION` constant and release-please's own manifest carry one version, and
+        # `rust-toolchain.toml`'s channel has to name the declared MSRV. release-please's
+        # `extra-files` entries are what move them together. `publish.yml` runs this same
+        # target against the tag, but that is after the release PR merged and every
+        # publishing lane is gated on it — so the drift costs a tag rather than a PR.
+        # `make lint` runs the same target locally.
+        run: make check-version
+
+      - name: Assert every workspace member inherits the lint policy
+        # `[workspace.lints]` in the root manifest is the one spelling of the policy; a
+        # member without `[lints] workspace = true` compiles and lints clean while carrying
+        # no floors at all, which is exactly what a crate added under time pressure does.
+        # docs/crates.md promises the floors on every member, so this makes that true.
+        run: |
+          for manifest in crates/*/Cargo.toml; do
+            awk '/^\[lints\]$/{inl=1; next} inl && /^workspace = true$/{ok=1} END{exit ok?0:1}' "${manifest}" || {
+              echo "::error::${manifest} has no [lints] workspace = true; it inherits no lint policy"
+              exit 1
+            }
+          done
+
+      # pyo3's build script queries an interpreter even for abi3 builds.
+      - name: Install Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      # pyright's Python wrapper runs the language server on Node and prefers a
+      # `node` already on PATH, so without this step the check runs on whichever
+      # major the runner image happens to ship.
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Assert each crates.io package ships both licence copies
+        # Cargo auto-includes a crate's own LICENSE* files but silently drops a
+        # cross-directory `include`, so the copy on disk is not evidence that the copy
+        # inside the published .crate is there. `--list` enumerates the package's
+        # contents without needing the workspace's path dependencies on crates.io first.
+        run: |
+          set -euo pipefail
+          for crate in opportune opportune-json opportune-adapters; do
+            listing="$(cargo package --list --allow-dirty -p "${crate}")"
+            for file in LICENSE-MIT LICENSE-APACHE; do
+              if ! grep -qx "${file}" <<<"${listing}"; then
+                echo "::error::the ${crate} package does not contain ${file}"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Cargo fmt
+        run: cargo fmt --all --check
+
+      - name: Cargo clippy
+        # --all-features: the adapters' Windows zone mapping and other feature-gated
+        # code is compiled, linted and tested nowhere in CI without this. --locked: the
+        # same exact-graph discipline as the test jobs, so linting cannot silently
+        # re-resolve.
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Cargo doc
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
+
+      - name: Cargo deny (default-build allow-list)
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
+
+      - name: Cargo deny (minimal-build allow-list)
+        # deny.minimal.toml re-checks the licence policy with default features off, so a
+        # dependency only reachable through a default feature cannot smuggle a licence the
+        # strict-adopter build would carry.
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
+        with:
+          arguments: --config deny.minimal.toml
+          command-arguments: licenses
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Sync development tools
+        # --no-install-project keeps this a pure lint stage: the extension wheel is the
+        # test job's business, and pyright reads the stubs through pyrightconfig.json.
+        run: uv sync --locked --no-install-project --project crates/opportune-py
+
+      - name: Check the generated models against the schema
+        # The Pydantic models are generated, never hand-edited, so the gate is that
+        # regenerating them from the exported schema reproduces the committed file.
+        # `make lint` runs the same target locally. UV_NO_SYNC keeps this stage pure:
+        # the environment was synced above, and a `uv run` here would otherwise install
+        # the project and build the extension wheel just to reach a dev tool.
+        env:
+          UV_NO_SYNC: "1"
+        run: make check-codegen
+
+      - name: Ruff check
+        run: uv run --no-sync --project crates/opportune-py ruff check crates/opportune-py
+
+      - name: Ruff format
+        run: uv run --no-sync --project crates/opportune-py ruff format --check crates/opportune-py
+
+      - name: Pyright
+        run: uv run --no-sync --project crates/opportune-py pyright --project crates/opportune-py
+
+      - name: Check the generated TypeScript types against the schema
+        # The npm package's `src/generated/types.ts` is generated from the same combined
+        # schema as the Pydantic models, so the gate is the same one: regenerate it and
+        # fail on any difference. `make lint` runs this target locally. Its prerequisite
+        # installs the package's tooling with `npm ci`, from the committed lockfile.
+        run: make check-codegen-ts
+
+      - name: TypeScript strict compile
+        # `tsc -p tsconfig.check.json` with `noEmit`: the package's own strict flags over `src/`,
+        # the examples and the suite. The drift check above proves the generated types are
+        # current; this proves they, and the hand-written surface that consumes them,
+        # compile — the suite included, so a generated type that stopped admitting a
+        # document the wire answers fails here rather than in a consumer's build.
+        run: npm --prefix crates/opportune-wasm/js run check
+
+      - name: Classify every documented Python and TypeScript snippet
+        # Every `python` and `ts` fence in README.md and docs/ has to be an entry
+        # the snippet driver knows, and every entry has to still be on its page.
+        # The classifier is standard-library Python and needs no built extension or
+        # module, so it runs in the fast lint stage; the two execution lanes run where
+        # their environments exist (`test-python` and `test-wasm`).
+        run: make check-docs-snippets
+
+  feature-matrix:
+    # The strict-adopter and wasm builds the default-featured lint/test jobs never
+    # see: the core with every feature off, the wire layer and the adapters without
+    # the bundled time zone database, the adapters with only the graph feature, and
+    # the core for wasm32-unknown-unknown.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Python
+        # pyo3's build script queries an interpreter even for abi3 builds, needed by the
+        # `opportune-py --no-default-features` check below.
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Core with no default features
+        # Proves the core and its tests/doctests never need the bundled tz database:
+        # jiff's system-database readers must be enough for the directory-loaded Engine
+        # path, and `engine_directory`'s `not(bundled-tzdb)` refusal branch must execute.
+        run: |
+          set -euo pipefail
+          cargo test -p opportune --no-default-features --locked
+          cargo test --doc -p opportune --no-default-features --locked
+
+      - name: Wire layer without the bundled time zone database
+        # `opportune-json` is what a Rust HTTP service embeds to read and write the
+        # wire format, and it must not pull ~400 KB of zone data into that service's
+        # graph — through its own defaults, which are what an adopter inherits, or
+        # through a stripped build. The suite proves the parse, write, schema and
+        # upgrade paths run on their own; the tree assertions prove `jiff-tzdb` is
+        # absent from the normal dependencies rather than merely unused by them. The
+        # tree is captured and `cargo tree`'s own status checked before the search
+        # runs over it, because a search of an empty stream reports success exactly
+        # when the guard stopped checking: a mistyped package or flag has to fail the
+        # guard, not turn it into a no-op.
+        run: |
+          set -euo pipefail
+          cargo test -p opportune-json --no-default-features --locked
+          for features in "--locked" "--no-default-features --locked"; do
+            # shellcheck disable=SC2086
+            tree=$(cargo tree -e normal -p opportune-json ${features}) || {
+              echo "::error::cargo tree failed for opportune-json ${features}, so the guard cannot say there is no leak"
+              exit 1
+            }
+            if printf '%s\n' "$tree" | grep jiff-tzdb >/dev/null; then
+              echo "::error::jiff-tzdb reaches opportune-json's normal dependencies with ${features}"
+              exit 1
+            fi
+          done
+
+      - name: Adapters feature combinations without default features
+        # Proves windows-zones, each provider, json, and the bundled time zone database
+        # stay independently optional: without them the CLDR data (and its
+        # Unicode-DFS-2016 licence) and the zone data must be out of the graph. The
+        # provider suites run `cargo test`, not `cargo check`, because what a build
+        # without the Windows mapping *does* is pinned by tests behind
+        # `#[cfg(not(feature = "windows-zones"))]` — a Windows zone name must come back
+        # unresolved rather than be guessed at — and the --all-features suites never
+        # compile them. A conversion resolves zone names against a real database, so
+        # those test runs keep `bundled-tzdb` on; the bundle-free `cargo check` lines
+        # beside them prove the library needs no bundled data, and the tree assertion
+        # that it is not in the normal dependencies at all.
+        run: |
+          set -euo pipefail
+          cargo check -p opportune-adapters --no-default-features --locked
+          for features in graph graph,json google google,json json; do
+            cargo check -p opportune-adapters --no-default-features --features "$features" --locked
+            tree=$(cargo tree -e normal -p opportune-adapters --no-default-features --features "$features" --locked) || {
+              echo "::error::cargo tree failed for opportune-adapters --features $features, so the guard cannot say there is no leak"
+              exit 1
+            }
+            if printf '%s\n' "$tree" | grep jiff-tzdb >/dev/null; then
+              echo "::error::jiff-tzdb reaches opportune-adapters' normal dependencies with --features $features"
+              exit 1
+            fi
+          done
+          cargo test -p opportune-adapters --no-default-features --features graph,bundled-tzdb --locked
+          cargo test -p opportune-adapters --no-default-features --features google,bundled-tzdb --locked
+
+      - name: Bindings without default features on host
+        # Runs the WASM crate's host test suite with `windows-zones` compiled out so its
+        # `#[cfg(not(feature = "windows-zones"))]` fail-closed assertion actually executes,
+        # and checks that the Python extension crate also compiles without `windows-zones`.
+        run: |
+          set -euo pipefail
+          cargo test -p opportune-wasm --no-default-features --locked
+          cargo check -p opportune-py --no-default-features --locked
+
+      - name: Core for wasm32-unknown-unknown
+        # The wasm build must resolve: no std-only jiff features, bundled tz
+        # database on (the wasm binding needs zone data with no filesystem).
+        # rust-toolchain.toml pins the compiler, and rustup applies that pin to every
+        # cargo and rustup invocation in the checkout, so this job builds with the pinned
+        # toolchain rather than the action's: the target has to be installed into the
+        # active toolchain, not into `stable` via the action's `targets:` input, which
+        # would leave this build failing with E0463.
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo check -p opportune --target wasm32-unknown-unknown --locked
+
+      - name: Wire layer for wasm32-unknown-unknown
+        # --no-default-features is the binding's own spelling: schemars must stay out
+        # of the wasm build, which only ever parses and writes the wire format.
+        run: cargo check -p opportune-json --no-default-features --target wasm32-unknown-unknown --locked
+
+      - name: Adapters for wasm32-unknown-unknown
+        # `json` is the feature a wasm binding turns on. This builds it with the
+        # adapters' default features, so `windows-zones` — and the CLDR mapping behind
+        # it — is in the graph: `windows-timezones` is WASM-clean by design, and this
+        # step is what proves the envelopes stay so. That the mapping can be compiled
+        # out at all is the `graph`-only step above's business.
+        run: cargo check -p opportune-adapters --features json --target wasm32-unknown-unknown --locked
+
+      - name: WASM binding for wasm32-unknown-unknown
+        # The binding's own crate, with its default features: `windows-zones` is on, so a
+        # provider payload naming a Windows zone converts exactly as it does natively.
+        # The `test-wasm` lane below compiles this crate for the same target, but through
+        # `wasm-pack` and only once `lint` has passed; this is the ungated compile check,
+        # so a binding that stops resolving for the target it ships on is reported here
+        # first rather than only at the end of the slowest lane — or at release.
+        run: cargo check -p opportune-wasm --target wasm32-unknown-unknown --locked
+
+      - name: WASM binding without default features
+        # The stripped build: `windows-zones` off, which is what keeps the CLDR mapping
+        # and its Unicode-DFS-2016 licence out of a bundle that does not need Windows
+        # zone names. `deny.minimal.toml` checks the same configuration's licence graph.
+        run: cargo check -p opportune-wasm --no-default-features --target wasm32-unknown-unknown --locked
+
+  test-rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The test harness links libpython, so it must match the interpreter pyo3 finds.
+      - name: Install Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: nextest
+
+      - name: Cargo nextest
+        run: cargo nextest run --locked --all-features --profile ci
+
+      - name: Two-process determinism check
+        # The whole scenario suite runs in two separate OS processes and the two
+        # canonical renderings must be byte-identical. Two calls inside one
+        # process would share every cache and iteration order between them, so
+        # they could agree while the engine was still order-dependent; this runs
+        # the standalone pair `make determinism` launches, which is the same
+        # command a developer reproduces locally. A difference in the dump means
+        # an answer depends on something outside its request.
+        timeout-minutes: 10
+        run: make determinism
+
+      # nextest does not run doctests, so the examples in the crate's own docs need
+      # a separate step or nothing ever compiles them.
+      - name: Cargo doctests
+        run: cargo test --doc --locked --all-features
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+
+  test-python:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14", "3.15"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-python: true
+
+      # The extension is compiled from source in this job, so the cargo cache applies
+      # here as much as in the jobs that invoke cargo directly.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Export the pinned Rust toolchain
+        # uv builds the extension from an sdist unpacked in its cache, outside the
+        # checkout, where rust-toolchain.toml does not reach and rustup falls back to
+        # the runner's default toolchain — the ambient drift the Makefile exports the
+        # same pin against for local `make dev` and `make wheel`. Deriving the value
+        # the same way keeps this job's compile on the channel rust-toolchain.toml
+        # names; the empty check turns a deleted or malformed pin into a red job
+        # instead of a silent fallback.
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+          if [ -z "${channel}" ]; then
+            echo "::error::rust-toolchain.toml declares no channel"
+            exit 1
+          fi
+          echo "RUSTUP_TOOLCHAIN=${channel}" >> "${GITHUB_ENV}"
+
+      - name: Build the extension and sync the test environment
+        # --reinstall-package is the correctness knob here, not a speed one. uv's cache
+        # serves the previously built extension wheel to a checkout whose Rust sources
+        # changed — the key covers the Python project, not the crates/ sources it compiles
+        # — so without the flag this job can run pytest against an extension built from an
+        # earlier commit and report it green. The flag makes uv build the package from this
+        # checkout on every run, and the restored cache keeps that build incremental.
+        # `make dev` carries the same flag for the same reason.
+        run: uv sync --locked --reinstall-package opportune --python ${{ matrix.python }} --project crates/opportune-py
+
+      - name: Pytest
+        run: uv run --no-sync --project crates/opportune-py pytest crates/opportune-py/tests
+
+      - name: Install Node
+        # Pyright's Python wrapper runs its language server on Node and prefers a `node`
+        # already on PATH, so pin Node 26 here just like the `lint` job before running
+        # `make test-docs-snippets-py`.
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: Check the documented Python snippets
+        # Pyright strict over every classified `python` fence, then each whole program
+        # executed against the extension this job just built. `make test-py` runs the
+        # same lane locally; the red-team case beside it proves a stale snippet fails.
+        run: make test-docs-snippets-py
+
+  test-wasm:
+    # The npm package's own suite over the module it ships: every committed golden
+    # compared as text, the recorded provider fixtures, the presets and the wasm32
+    # integer-parity cases, then the gzipped size budget on the same release module
+    # `make test-wasm` builds and `make wasm-size` measures. The feature matrix above
+    # proves the binding compiles for wasm32; this lane is the only one that executes
+    # it, so it is the only evidence the published package works. The suite runs twice
+    # over the same release module, under Node and under Bun's own runner, because the
+    # manifest declares both runtimes and a regression in Bun's `node:module`
+    # resolution, in the `require('fs')` read of the `.wasm` that the compiled glue
+    # performs, or in its explicit resource management must fail here rather than ship
+    # to a Bun consumer. Gated on `lint`
+    # because a commit that fails formatting, lint, the TypeScript compile or either
+    # codegen drift gate should not pay for a `wasm-opt` release build; the trade is
+    # lint's duration added to this lane's start on a green run.
+    name: Node and Bun suites over the release WASM module
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install wasm-pack
+        # Pinned, unlike the `nextest` installs elsewhere in these workflows, because
+        # this tool decides the bytes of an artefact rather than only how it is tested:
+        # each wasm-pack release downloads one fixed binaryen, so its version is what
+        # runs the `-Oz` pass that writes `pkg/opportune_wasm_bg.wasm`. An unpinned
+        # "latest" moves that optimiser — and therefore the module's size and its glue
+        # — with no diff in this repository, against a budget whose 556,337-byte
+        # baseline was recorded from 0.15.1. Bump it deliberately, the way
+        # `rust-toolchain.toml` is bumped; Dependabot tracks action SHAs, not `tool:`
+        # inputs.
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: wasm-pack@0.15.1
+
+      - name: Build the release module, check the budget, and run the suite
+        # The order lives in the Makefile targets, beside the reasons it is that order.
+        # On a fresh checkout `npm ci` runs first, as the `wasm` target's prerequisite,
+        # and only when the committed lockfile has moved; then the release module,
+        # `npm run build`, the budget, and `node --test` against `dist/`.
+        # wasm-pack installs the wasm32 target into the pinned toolchain itself.
+        run: make test-wasm
+
+      - name: Install Node 24
+        # The other end of the manifest's floor. The suite above runs on the newest LTS
+        # this repository develops against; the declared minimum is a second runtime a
+        # consumer may install onto, and the packaged resolution cases are the ones that
+        # read what that runtime provides — `require(esm)` without a flag, `import.meta.resolve`
+        # for every subpath, and the emitted declarations compiling under `using`. A floor
+        # nothing executes is a promise, so the lane below executes it; `using` releases a
+        # handle at run time in the suite above, and here it has to compile.
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Run the packed-package suite and the snippet gate on the declared Node floor
+        # The installed-tarball cases pack, install and import the built package from a
+        # temporary consumer project, under whichever runtime runs the suite, so this is
+        # the lane that proves the floor: ESM resolution and `require()` of the CommonJS
+        # entry on Node 24, and the declarations compiled by a consumer that has only the
+        # `ES2024` lib. The documented TypeScript snippets are compiled and executed on
+        # the same floor, because their `using` blocks and generated types are the same
+        # `esnext.disposable` and `ES2024` surface this lane exists to prove.
+        run: |
+          node --test crates/opportune-wasm/js/tests/packed-package.test.mjs
+          make test-docs-snippets-ts
+
+      - name: Install Bun
+        # Pinned by SHA like every other action here. The version is the declared
+        # support floor, not "latest": the manifest's `engines` promises what was
+        # verified, so the gate runs on exactly that version and a regression below
+        # the floor is a red lane rather than a silent promotion of untested ground.
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+
+      - name: Run the same suite under Bun against the same module
+        # Bun's `node:test` shim only resolves inside `bun test`, so Bun's own runner
+        # is the one way to drive these files; it reads them unchanged. The module was
+        # built once above and the budget was measured on it, so a Bun failure here is
+        # evidence about the artefact a consumer downloads, not a second build.
+        run: bun test crates/opportune-wasm/js/tests/
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-python: true
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # Same reason as test-python above: `uv build` compiles the extension from an
+      # sdist unpacked outside the checkout, so the pin has to travel in the
+      # environment rather than in rust-toolchain.toml.
+      - name: Export the pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+          if [ -z "${channel}" ]; then
+            echo "::error::rust-toolchain.toml declares no channel"
+            exit 1
+          fi
+          echo "RUSTUP_TOOLCHAIN=${channel}" >> "${GITHUB_ENV}"
+
+      - name: Build sdist and wheel
+        run: uv build --project crates/opportune-py --out-dir dist
+
+      - name: Assert the wheel targets the abi3 ABI
+        # The single-wheel-per-platform promise in README.md rests on the
+        # abi3-py312 pyo3 feature; a wheel tagged for one interpreter means that
+        # feature was lost.
+        run: |
+          wheel="$(ls dist/*.whl)"
+          case "${wheel}" in
+            *-cp312-abi3-*) ;;
+            *) echo "::error::${wheel} is not a cp312-abi3 wheel"; exit 1 ;;
+          esac
+
+      - name: Assert both distributions ship the root licence copies
+        # A distribution is the artefact a consumer receives, so the assertion reads
+        # inside it rather than the source tree. Byte comparison, not presence: a stale
+        # copy is as wrong as a missing one, and maturin's `license-files` is the only
+        # thing that puts either copy there.
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/dist-licences
+          mkdir -p /tmp/dist-licences/wheel /tmp/dist-licences/sdist
+          python3 -m zipfile -e "$(ls dist/*.whl)" /tmp/dist-licences/wheel
+          tar -xzf "$(ls dist/*.tar.gz)" -C /tmp/dist-licences/sdist
+          wheel_licences="$(find /tmp/dist-licences/wheel -type d -name licenses -print -quit)"
+          sdist_root="$(find /tmp/dist-licences/sdist -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          for file in LICENSE-MIT LICENSE-APACHE; do
+            for copy in "${wheel_licences}/${file}" "${sdist_root}/${file}"; do
+              if [ ! -f "${copy}" ]; then
+                echo "::error::${copy} is missing from the distribution"
+                exit 1
+              fi
+              if ! cmp "${file}" "${copy}"; then
+                echo "::error::${copy} differs from ${file}"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Install the sdist and import it
+        # `uv build` produces the sdist from the checkout and the wheel from that sdist, so
+        # this installs the archive a platform with no published wheel would actually
+        # receive. From a clean virtual environment, so nothing built earlier can be
+        # serving the import.
+        run: |
+          set -euo pipefail
+          uv venv --python 3.13 /tmp/sdist-venv
+          uv pip install --python /tmp/sdist-venv/bin/python dist/*.tar.gz
+          /tmp/sdist-venv/bin/python -c 'import opportune, opportune._opportune as extension; assert extension.__version__ == opportune.__version__'
+
+      - name: Smoke-test the built wheel on the oldest and newest supported Python
+        # Installs the same wheel on both ends of the supported range, so a wheel that
+        # omits package data or silently loses abi3 compatibility fails here.
+        run: |
+          for version in 3.12 3.15; do
+            uv venv --python "${version}" "/tmp/wheel-venv-${version}"
+            uv pip install --python "/tmp/wheel-venv-${version}/bin/python" dist/*.whl
+            "/tmp/wheel-venv-${version}/bin/python" -c 'import pathlib, opportune, opportune._models, opportune._opportune as extension; assert extension.__version__ == opportune.__version__; package = pathlib.Path(opportune.__file__).parent; assert (package / "py.typed").is_file(); assert (package / "_opportune.pyi").is_file(); assert (package / "_models.py").is_file()'
+          done
+
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Read the declared MSRV
+        id: msrv
+        # The workspace manifest is the one spelling of the MSRV; this job would otherwise
+        # keep testing a toolchain nobody declared the moment rust-version moves. rustup
+        # names toolchains with three components, so pad a two-component rust-version.
+        run: |
+          msrv="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["rust-version"])')"
+          case "${msrv}" in
+            *.*.*) ;;
+            *) msrv="${msrv}.0" ;;
+          esac
+          echo "msrv=${msrv}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install Rust ${{ steps.msrv.outputs.msrv }}
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: ${{ steps.msrv.outputs.msrv }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Cargo check
+        # RUSTUP_TOOLCHAIN overrides the exact toolchain rust-toolchain.toml pins, so this
+        # job compiles with the declared floor. That override is the only thing separating
+        # it from the lint job's compile.
+        env:
+          RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.msrv }}
+        run: cargo check --locked --all-targets --all-features

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3b22b01ffc865cce3805d8370e5b315afcefd66723e7d2aa5aa10c15d600a200 # shrinks to selector = Any([All([Tag("0")]), All([])]), item_tags = [], participant_id = "a", role_index = 0
+cc 5a6ec8ec7966b7cf2d9a2b3fa9437b1b595c0f30b8d77604b08f23b233bfc5f6 # shrinks to selector = All([Ids(["r"])]), item_tags = [], participant_id = "ra", role_index = 0

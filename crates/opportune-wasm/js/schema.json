@@ -1,0 +1,2474 @@
+{
+  "$defs": {
+    "AdapterDiagnostic": {
+      "additionalProperties": false,
+      "description": "One per-event finding as JSON.",
+      "properties": {
+        "code": {
+          "description": "The stable, machine-readable code.",
+          "type": "string"
+        },
+        "event_id": {
+          "description": "The provider's ID for the event the finding is about, when there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "A sentence naming the value and why it was left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "AdapterDiagnostic",
+      "type": "object"
+    },
+    "AnnotatedBlock": {
+      "additionalProperties": false,
+      "description": "One converted block as JSON, with the provider's event ID beside it.",
+      "properties": {
+        "block": {
+          "$ref": "#/$defs/Block",
+          "description": "The block, in the wire layer's own shape."
+        },
+        "event_id": {
+          "description": "The provider's ID for the event, or `null` when the source reports spans\nrather than events.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "block"
+      ],
+      "title": "AnnotatedBlock",
+      "type": "object"
+    },
+    "AtLeastTerm": {
+      "additionalProperties": false,
+      "description": "A term needing a count of hosts among the participants a selector matches.",
+      "properties": {
+        "at_least": {
+          "description": "How many hosts the term needs.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "of": {
+          "$ref": "#/$defs/Selector",
+          "description": "Which participants can fill it."
+        }
+      },
+      "required": [
+        "at_least",
+        "of"
+      ],
+      "title": "AtLeastTerm",
+      "type": "object"
+    },
+    "BlackoutParams": {
+      "additionalProperties": false,
+      "description": "The parameters of a `blackout` rule.",
+      "properties": {
+        "spans": {
+          "description": "Local date-time spans inside which nothing may be booked.",
+          "items": {
+            "$ref": "#/$defs/Span"
+          },
+          "type": "array"
+        },
+        "zone": {
+          "description": "`participant`, `event`, or an IANA zone name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "zone",
+        "spans"
+      ],
+      "title": "BlackoutParams",
+      "type": "object"
+    },
+    "Block": {
+      "additionalProperties": false,
+      "description": "One span on a participant's calendar.",
+      "properties": {
+        "all_day": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Whether the source marked the block all day."
+        },
+        "event_key": {
+          "description": "The caller's ID for the event this block is one instance of.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "span": {
+          "$ref": "#/$defs/Span",
+          "description": "The block's start and end instants, which round outward."
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "busy",
+          "description": "How the block affects availability. A provider may report a status this\ncrate does not know, and an unrecognised value reads as `busy`; absent\nmeans `busy`."
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Everything the block is tagged with."
+        },
+        "travel_after": {
+          "description": "Travel the caller computed to leave the block.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "travel_before": {
+          "description": "Travel the caller computed to reach the block.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "span"
+      ],
+      "title": "Block",
+      "type": "object"
+    },
+    "CalendarOutcome": {
+      "description": "What one participant's calendar converted into.",
+      "discriminator": {
+        "propertyName": "status"
+      },
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The calendar converted.",
+          "properties": {
+            "blocks": {
+              "description": "The converted blocks, in provider order.",
+              "items": {
+                "$ref": "#/$defs/AnnotatedBlock"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "description": "Per-event findings that did not stop the conversion.",
+              "items": {
+                "$ref": "#/$defs/AdapterDiagnostic"
+              },
+              "type": "array"
+            },
+            "status": {
+              "const": "available",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "blocks",
+            "diagnostics"
+          ],
+          "title": "AvailableCalendarOutcome",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The calendar could not be converted, so availability is unknown rather\nthan answered with no blocks.",
+          "properties": {
+            "code": {
+              "description": "A stable, machine-readable code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "A sentence naming what could not be converted and why.",
+              "type": "string"
+            },
+            "status": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "code",
+            "message"
+          ],
+          "title": "UnavailableCalendarOutcome",
+          "type": "object"
+        }
+      ],
+      "title": "CalendarOutcome"
+    },
+    "CalendarSpec": {
+      "additionalProperties": false,
+      "description": "A named working calendar.",
+      "properties": {
+        "holidays": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Dates that are not worked whatever the weekday."
+        },
+        "working_days": {
+          "description": "The weekdays the calendar works, written as day keys such as `mon-fri` or\n`mon,wed`.\n\nA count of working days needs a calendar that works at least one weekday:\nan absent list is the day-list syntax's spelling of \"no working day\",\nwhich the engine rejects with `working_days_empty`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zone": {
+          "description": "The zone the calendar's civil dates are read in.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "zone"
+      ],
+      "title": "CalendarSpec",
+      "type": "object"
+    },
+    "CapMeasure": {
+      "description": "What a `cap` measures.",
+      "oneOf": [
+        {
+          "const": "count",
+          "description": "Each matching event counts once.",
+          "type": "string"
+        },
+        {
+          "const": "minutes",
+          "description": "Each matching event contributes its own duration.",
+          "type": "string"
+        }
+      ],
+      "title": "CapMeasure"
+    },
+    "CapParams": {
+      "additionalProperties": false,
+      "description": "The parameters of a `cap` rule.",
+      "properties": {
+        "count": {
+          "$ref": "#/$defs/Selector",
+          "description": "Which events the cap measures, matched against their tags."
+        },
+        "limit": {
+          "description": "The most the period may hold.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "measure": {
+          "$ref": "#/$defs/CapMeasure",
+          "description": "Whether events or their minutes count."
+        },
+        "per": {
+          "$ref": "#/$defs/CapPer",
+          "description": "Whether the limit applies to each participant or to the pool together."
+        },
+        "period": {
+          "$ref": "#/$defs/CapPeriod",
+          "description": "The civil period a bucket covers."
+        },
+        "week_starts": {
+          "description": "The weekday a week bucket starts on, or absent for Monday.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zone": {
+          "description": "The zone the bucket labels are read in.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "measure",
+        "limit",
+        "period",
+        "per",
+        "zone"
+      ],
+      "title": "CapParams",
+      "type": "object"
+    },
+    "CapPer": {
+      "description": "Whether a `cap` limits each participant or the pool together.",
+      "oneOf": [
+        {
+          "const": "each",
+          "description": "Each participant in `who` is limited on their own.",
+          "type": "string"
+        },
+        {
+          "const": "pooled",
+          "description": "The participants in `who` are limited together.",
+          "type": "string"
+        }
+      ],
+      "title": "CapPer"
+    },
+    "CapPeriod": {
+      "description": "The civil period a `cap` bucket covers.",
+      "oneOf": [
+        {
+          "const": "day",
+          "description": "One civil day.",
+          "type": "string"
+        },
+        {
+          "const": "week",
+          "description": "Seven civil days from the configured weekday.",
+          "type": "string"
+        },
+        {
+          "const": "month",
+          "description": "One civil month.",
+          "type": "string"
+        }
+      ],
+      "title": "CapPeriod"
+    },
+    "ClearanceParams": {
+      "additionalProperties": false,
+      "description": "The parameters of a `clearance` rule.",
+      "properties": {
+        "after": {
+          "description": "The gap the booking needs after it.",
+          "type": "string"
+        },
+        "before": {
+          "description": "The gap the booking needs before it.",
+          "type": "string"
+        },
+        "min_gap": {
+          "description": "The least gap between any two events.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "before",
+        "after",
+        "min_gap"
+      ],
+      "title": "ClearanceParams",
+      "type": "object"
+    },
+    "DateCount": {
+      "description": "How many offers fall on one civil date.",
+      "properties": {
+        "date": {
+          "description": "The date in the display zone.",
+          "type": "string"
+        },
+        "offers": {
+          "description": "How many offers start on it.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "date",
+        "offers"
+      ],
+      "title": "DateCount",
+      "type": "object"
+    },
+    "DateMax": {
+      "additionalProperties": false,
+      "description": "A `lead_time` maximum written as a date in the event zone.",
+      "properties": {
+        "date": {
+          "description": "The last local date a start may fall on.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "date"
+      ],
+      "title": "DateMax",
+      "type": "object"
+    },
+    "DaysMax": {
+      "additionalProperties": false,
+      "description": "A `lead_time` maximum written as a count of calendar days.",
+      "properties": {
+        "days": {
+          "description": "How many calendar days after today a start may fall on.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "days"
+      ],
+      "title": "DaysMax",
+      "type": "object"
+    },
+    "Diagnostic": {
+      "description": "One validation finding.",
+      "properties": {
+        "code": {
+          "description": "The stable, machine-readable code.",
+          "type": "string"
+        },
+        "message": {
+          "description": "The human-readable message.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The RFC 6901 pointer of the request field this finding is about.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "Diagnostic",
+      "type": "object"
+    },
+    "Diagnostics": {
+      "description": "What `validate` found in a request.",
+      "properties": {
+        "errors": {
+          "description": "Everything that makes the request impossible.",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          },
+          "type": "array"
+        },
+        "warnings": {
+          "description": "Everything the caller should know that does not make it impossible.",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "errors",
+        "warnings"
+      ],
+      "title": "Diagnostics",
+      "type": "object"
+    },
+    "DurationMax": {
+      "additionalProperties": false,
+      "description": "A `lead_time` maximum written as a duration.",
+      "properties": {
+        "duration": {
+          "description": "How far ahead a start may be.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "duration"
+      ],
+      "title": "DurationMax",
+      "type": "object"
+    },
+    "Excluded": {
+      "description": "One candidate start that was not offered.",
+      "properties": {
+        "part": {
+          "description": "The goal part the start belonged to.",
+          "type": "string"
+        },
+        "reasons": {
+          "description": "Why the start was not offered.",
+          "items": {
+            "$ref": "#/$defs/Reason"
+          },
+          "type": "array"
+        },
+        "start": {
+          "description": "The start that was not offered.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "part",
+        "reasons"
+      ],
+      "title": "Excluded",
+      "type": "object"
+    },
+    "Explain": {
+      "additionalProperties": false,
+      "description": "How much exclusion detail a search returns.",
+      "properties": {
+        "limit": {
+          "description": "The maximum number of reasons returned across every excluded start.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "title": "Explain",
+      "type": "object"
+    },
+    "Goal": {
+      "additionalProperties": false,
+      "description": "What is being booked.",
+      "properties": {
+        "candidates": {
+          "description": "Caller-supplied candidate start instants, instead of a grid.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "display_zone": {
+          "description": "The zone offers are grouped by date in, or absent for the event zone.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Grid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The grid candidate starts are drawn from, or absent for the default grid."
+        },
+        "parts": {
+          "description": "The parts of the booking. Version 1 requires exactly one.",
+          "items": {
+            "$ref": "#/$defs/Part"
+          },
+          "type": "array"
+        },
+        "search_window": {
+          "$ref": "#/$defs/Span",
+          "description": "The range of starts to consider."
+        },
+        "zone": {
+          "description": "The event zone.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parts",
+        "search_window",
+        "zone"
+      ],
+      "title": "Goal",
+      "type": "object"
+    },
+    "GraphWorkingHoursOutcome": {
+      "description": "One mailbox's working hours, as a rule or as the reason it could not become\none.\n\nWorking hours are Graph-only, which is why the generated model is named\n`GraphWorkingHoursOutcome`. The failure is a value rather than an exception so\na caller can fall back to its own window without catching one.",
+      "discriminator": {
+        "propertyName": "status"
+      },
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The working hours became a `window` rule.",
+          "properties": {
+            "rule": {
+              "$ref": "#/$defs/WindowRule",
+              "description": "The `window` rule, in the wire layer's own shape."
+            },
+            "status": {
+              "const": "available",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "rule"
+          ],
+          "title": "AvailableWorkingHoursOutcome",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The working hours could not become a rule.",
+          "properties": {
+            "code": {
+              "description": "A stable, machine-readable code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "A sentence naming what could not be converted and why.",
+              "type": "string"
+            },
+            "status": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "code",
+            "message"
+          ],
+          "title": "UnavailableWorkingHoursOutcome",
+          "type": "object"
+        }
+      ],
+      "title": "GraphWorkingHoursOutcome"
+    },
+    "Grid": {
+      "additionalProperties": false,
+      "description": "A local clock grid of candidate starts.",
+      "properties": {
+        "anchor": {
+          "description": "The local minute each day's grid is anchored on, or absent for `00:00`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "step": {
+          "description": "The step between candidate local minutes.",
+          "type": "string"
+        },
+        "zone": {
+          "description": "The zone the grid's clock is read in, or absent for the event zone.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "step"
+      ],
+      "title": "Grid",
+      "type": "object"
+    },
+    "LeadTimeMax": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DurationMax",
+          "description": "At most `now` plus a duration."
+        },
+        {
+          "$ref": "#/$defs/DaysMax",
+          "description": "At most a count of calendar days after today."
+        },
+        {
+          "$ref": "#/$defs/WorkingDaysMax",
+          "description": "At most the n-th working day after today, on a named calendar."
+        },
+        {
+          "$ref": "#/$defs/DateMax",
+          "description": "At most this local date in the event zone."
+        }
+      ],
+      "description": "A `lead_time` maximum: how far ahead a start may be.",
+      "title": "LeadTimeMax"
+    },
+    "LeadTimeParams": {
+      "additionalProperties": false,
+      "description": "The parameters of a `lead_time` rule.",
+      "properties": {
+        "max": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LeadTimeMax"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The latest start allowed, or absent for none beyond the search window."
+        },
+        "min": {
+          "description": "The minimum notice, measured from the booking's occupied start.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "min"
+      ],
+      "title": "LeadTimeParams",
+      "type": "object"
+    },
+    "Limits": {
+      "additionalProperties": false,
+      "description": "Configurable caps on request size.\n\nEvery field is optional: an absent field — or an explicit `null`, which a\nbinding that writes every key emits — is the engine's default for that cap,\n`Limits::default`. Writing a `Limits` back out states all ten, so one\ndocument carries the engine's whole configuration.",
+      "properties": {
+        "max_blocks_per_participant": {
+          "default": null,
+          "description": "Maximum number of blocks per participant, or absent for the engine\ndefault.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_candidate_starts": {
+          "default": null,
+          "description": "Maximum number of candidate starts in one search, or absent for the engine\ndefault.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_duration_minutes": {
+          "default": null,
+          "description": "Maximum length of a booking, a booking or block's travel or a clearance in\nminutes, or absent for the engine default.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_explain_limit": {
+          "default": null,
+          "description": "Maximum `explain.limit` a request may ask for, or absent for the engine\ndefault.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_occurrences": {
+          "default": null,
+          "description": "Maximum number of occurrences in one request, or absent for the engine\ndefault.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_participants": {
+          "default": null,
+          "description": "Maximum number of participants in one request, or absent for the engine\ndefault.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_requirement_slots": {
+          "default": null,
+          "description": "Maximum number of host slots one requirement may ask for, and the number of\nterms it may name, or absent for the engine default.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_rules": {
+          "default": null,
+          "description": "Maximum number of rules in one request, or absent for the engine default.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_search_window_days": {
+          "default": null,
+          "description": "Maximum search-window length in days, or absent for the engine default.\n\nA day count is already `u32` in the domain and no pointer width is\ninvolved, so it is read as one here too: a larger value is rejected rather\nthan saturated into a limit no calendar could satisfy.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_zone_periods_per_participant": {
+          "default": null,
+          "description": "Maximum number of zone periods one participant may carry, or absent for the\nengine default.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "title": "Limits",
+      "type": "object"
+    },
+    "MatchAll": {
+      "const": true
+    },
+    "Meta": {
+      "description": "The versions an answer was produced from.",
+      "properties": {
+        "engine": {
+          "description": "The engine's version.",
+          "type": "string"
+        },
+        "schema": {
+          "description": "The schema version of the response shape.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tzdb": {
+          "description": "The time zone database's version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "engine",
+        "schema",
+        "tzdb"
+      ],
+      "title": "Meta",
+      "type": "object"
+    },
+    "Occurrence": {
+      "additionalProperties": false,
+      "description": "One event the caller can identify, already expanded.",
+      "properties": {
+        "event_key": {
+          "description": "The caller's ID for this event instance.",
+          "type": "string"
+        },
+        "participants": {
+          "description": "The participants the event involves.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "span": {
+          "$ref": "#/$defs/Span",
+          "description": "When the event happens."
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Everything the event is tagged with."
+        }
+      },
+      "required": [
+        "event_key",
+        "span",
+        "participants"
+      ],
+      "title": "Occurrence",
+      "type": "object"
+    },
+    "Offer": {
+      "description": "One bookable time.",
+      "properties": {
+        "events": {
+          "description": "One event per goal part.",
+          "items": {
+            "$ref": "#/$defs/OfferEvent"
+          },
+          "type": "array"
+        },
+        "flags": {
+          "description": "What the caller should know about the offer.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "events",
+        "flags"
+      ],
+      "title": "Offer",
+      "type": "object"
+    },
+    "OfferEvent": {
+      "description": "One booked event: its part, its span, who could take it and who was chosen.",
+      "properties": {
+        "assignment": {
+          "description": "The chosen assignment, one list per term.",
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "eligible": {
+          "description": "Who could fill each term, one list per term.",
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "end": {
+          "description": "The booking's end.",
+          "type": "string"
+        },
+        "part": {
+          "description": "The goal part's ID.",
+          "type": "string"
+        },
+        "reserve": {
+          "description": "Travel every participant the booking needs occupies.",
+          "items": {
+            "$ref": "#/$defs/ReserveSpan"
+          },
+          "type": "array"
+        },
+        "start": {
+          "description": "The booking's start.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "part",
+        "start",
+        "end",
+        "eligible",
+        "assignment",
+        "reserve"
+      ],
+      "title": "OfferEvent",
+      "type": "object"
+    },
+    "Part": {
+      "additionalProperties": false,
+      "description": "One event within a goal.",
+      "properties": {
+        "duration": {
+          "description": "The length of the event.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The part's ID, or absent for `main`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requirement": {
+          "$ref": "#/$defs/Requirement",
+          "description": "The terms that decide who can take it."
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "What is being booked."
+        },
+        "travel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Travel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Travel the new booking needs, or absent for none."
+        }
+      },
+      "required": [
+        "duration",
+        "requirement"
+      ],
+      "title": "Part",
+      "type": "object"
+    },
+    "Participant": {
+      "additionalProperties": false,
+      "description": "One participant and what is already on their calendar.",
+      "properties": {
+        "calendar": {
+          "description": "The participant's blocks, or absent when no calendar was supplied.",
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The participant's opaque, stable ID.",
+          "type": "string"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParticipantKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Person or resource, or absent for a person."
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Role"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Host or attendee, or absent for a host."
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Everything the participant is tagged with."
+        },
+        "zone": {
+          "description": "The participant's home zone.",
+          "type": "string"
+        },
+        "zone_periods": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ZonePeriod"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Spans in other zones."
+        }
+      },
+      "required": [
+        "id",
+        "zone"
+      ],
+      "title": "Participant",
+      "type": "object"
+    },
+    "ParticipantKind": {
+      "description": "Whether a participant is a person or a resource.",
+      "oneOf": [
+        {
+          "const": "person",
+          "description": "A person.",
+          "type": "string"
+        },
+        {
+          "const": "resource",
+          "description": "A room, a vehicle or a piece of equipment.",
+          "type": "string"
+        }
+      ],
+      "title": "ParticipantKind"
+    },
+    "ParticipantTravel": {
+      "additionalProperties": false,
+      "description": "One participant's travel, replacing the part's travel in both directions.",
+      "properties": {
+        "after": {
+          "description": "Travel needed after the event.",
+          "type": "string"
+        },
+        "before": {
+          "description": "Travel needed before the event.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "title": "ParticipantTravel",
+      "type": "object"
+    },
+    "PersonTerm": {
+      "additionalProperties": false,
+      "description": "A term filled by the participant with this ID.",
+      "properties": {
+        "person": {
+          "description": "The participant's ID.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "person"
+      ],
+      "title": "PersonTerm",
+      "type": "object"
+    },
+    "Proposal": {
+      "additionalProperties": false,
+      "description": "A booking a caller proposes to confirm.",
+      "properties": {
+        "events": {
+          "description": "One proposed event per goal part.",
+          "items": {
+            "$ref": "#/$defs/ProposalEvent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "events"
+      ],
+      "title": "Proposal",
+      "type": "object"
+    },
+    "ProposalEvent": {
+      "additionalProperties": false,
+      "description": "One event of a [`WireProposal`].",
+      "properties": {
+        "assignment": {
+          "description": "The hosts to assign, one list per term.",
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "part": {
+          "description": "The goal part's ID.",
+          "type": "string"
+        },
+        "start": {
+          "description": "The proposed start.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "part",
+        "start",
+        "assignment"
+      ],
+      "title": "ProposalEvent",
+      "type": "object"
+    },
+    "RangesQuery": {
+      "additionalProperties": false,
+      "description": "What calendar and occurrence data a request needs.",
+      "properties": {
+        "goal": {
+          "$ref": "#/$defs/Goal",
+          "description": "What is being booked."
+        },
+        "now": {
+          "description": "The current instant, which the wire rounds up to the next minute.",
+          "type": "string"
+        },
+        "participants": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Participant"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "The participants, without their calendars."
+        },
+        "rules": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Rule"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "The final rule list."
+        }
+      },
+      "required": [
+        "now",
+        "goal"
+      ],
+      "title": "RangesQuery",
+      "type": "object"
+    },
+    "Reason": {
+      "description": "One reason a participant cannot take a candidate start.",
+      "properties": {
+        "code": {
+          "description": "Why the start was excluded.",
+          "type": "string"
+        },
+        "event_key": {
+          "description": "The event key of the block that caused the exclusion, when a block did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasonParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The structured parameters the code carries, when it carries any."
+        },
+        "participant": {
+          "description": "The participant the reason applies to, or absent for a start-level reason.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule": {
+          "description": "The rule that produced the exclusion, when an explicit rule applies.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "description": "The tags of the block that caused the exclusion, when a block did.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "tags"
+      ],
+      "title": "Reason",
+      "type": "object"
+    },
+    "ReasonParams": {
+      "description": "The structured parameters a [`WireReason`] carries.",
+      "properties": {
+        "bucket": {
+          "description": "The bucket a cap was measured over.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "The cap's limit.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "used": {
+          "description": "How much the bucket holds before the booking's contribution.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "used",
+        "limit",
+        "bucket"
+      ],
+      "title": "ReasonParams",
+      "type": "object"
+    },
+    "Request": {
+      "additionalProperties": false,
+      "description": "A request to search for availability.",
+      "properties": {
+        "calendars": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/CalendarSpec"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": {},
+          "description": "Named working calendars, by name."
+        },
+        "exclude_event_keys": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The caller's event keys for the events it is moving, which the engine\nignores wherever an existing event would otherwise block time, trigger\n`rest` activity or count toward a cap."
+        },
+        "explain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Explain"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether to report why candidate starts were not offered."
+        },
+        "goal": {
+          "$ref": "#/$defs/Goal",
+          "description": "What is being booked."
+        },
+        "limit": {
+          "description": "The maximum number of offers to return, or absent for the engine's default.",
+          "format": "uint64",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "now": {
+          "description": "The current instant, which the wire rounds up to the next minute.",
+          "type": "string"
+        },
+        "occurrences": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Occurrence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "The caller's bookings and sessions."
+        },
+        "participants": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Participant"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Everyone the request knows about."
+        },
+        "rules": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Rule"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "The final rule list."
+        },
+        "weights": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "format": "int32",
+                "maximum": 2147483647,
+                "minimum": -2147483648,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": {},
+          "description": "The weight each participant's assignment carries, by participant ID."
+        }
+      },
+      "required": [
+        "now",
+        "goal"
+      ],
+      "title": "Request",
+      "type": "object"
+    },
+    "RequiredRanges": {
+      "description": "One UTC envelope of data a request needs.",
+      "properties": {
+        "calendar": {
+          "$ref": "#/$defs/Span",
+          "description": "The UTC range every participant's calendar must cover."
+        },
+        "occurrences": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Span"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The UTC range occurrence data must cover, or absent when no cap applies.\n\nAn omitted field and an explicit `null` both read as no occurrence range;\nthe field is omitted rather than written as `null`, matching every other\noptional response field."
+        }
+      },
+      "required": [
+        "calendar"
+      ],
+      "title": "RequiredRanges",
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": false,
+      "description": "Who can take a part: every named term, filled by distinct hosts.",
+      "properties": {
+        "all": {
+          "description": "The terms every booking must satisfy.",
+          "items": {
+            "$ref": "#/$defs/Term"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "all"
+      ],
+      "title": "Requirement",
+      "type": "object"
+    },
+    "ReserveSpan": {
+      "description": "One span of time the caller should hold on a participant's calendar.",
+      "properties": {
+        "kind": {
+          "description": "What the hold is for.",
+          "type": "string"
+        },
+        "participant": {
+          "description": "The participant to hold it for.",
+          "type": "string"
+        },
+        "span": {
+          "$ref": "#/$defs/Span",
+          "description": "The span to hold."
+        }
+      },
+      "required": [
+        "participant",
+        "kind",
+        "span"
+      ],
+      "title": "ReserveSpan",
+      "type": "object"
+    },
+    "Response": {
+      "description": "What a search returns.",
+      "properties": {
+        "dates": {
+          "description": "Every civil date the search window touches, with its offer count.",
+          "items": {
+            "$ref": "#/$defs/DateCount"
+          },
+          "type": "array"
+        },
+        "excluded": {
+          "description": "The candidate starts that were not offered.",
+          "items": {
+            "$ref": "#/$defs/Excluded"
+          },
+          "type": "array"
+        },
+        "excluded_truncated": {
+          "description": "Whether the explanation limit cut the exclusion list short.",
+          "type": "boolean"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta",
+          "description": "The versions the answer was produced from."
+        },
+        "offers": {
+          "description": "The bookable times, in start order.",
+          "items": {
+            "$ref": "#/$defs/Offer"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "description": "Whether the offer limit cut the list short.",
+          "type": "boolean"
+        },
+        "warnings": {
+          "description": "Request warnings.",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "offers",
+        "dates",
+        "truncated",
+        "excluded",
+        "excluded_truncated",
+        "warnings",
+        "meta"
+      ],
+      "title": "Response",
+      "type": "object"
+    },
+    "RestParams": {
+      "additionalProperties": false,
+      "description": "The parameters of a `rest` rule.",
+      "properties": {
+        "late_after": {
+          "description": "The local time from which a finish counts as late.",
+          "type": "string"
+        },
+        "not_before": {
+          "description": "The local time before which a start counts as early.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "late_after",
+        "not_before"
+      ],
+      "title": "RestParams",
+      "type": "object"
+    },
+    "Role": {
+      "description": "A participant's role in a request.",
+      "oneOf": [
+        {
+          "const": "host",
+          "description": "A participant assigned to bookings through the requirement.",
+          "type": "string"
+        },
+        {
+          "const": "attendee",
+          "description": "A participant who must be free for every offer but is never assigned.",
+          "type": "string"
+        }
+      ],
+      "title": "Role"
+    },
+    "Rule": {
+      "description": "One rule: an ID, which participants it constrains, which bookings it applies\nto, and the kind-specific parameters.",
+      "discriminator": {
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/WindowRule"
+        },
+        {
+          "additionalProperties": false,
+          "description": "When bookings may not happen.",
+          "properties": {
+            "id": {
+              "description": "The rule's ID, unique in the request.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "blackout",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/BlackoutParams",
+              "description": "The blackout specification."
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": true,
+              "description": "Which bookings it applies to, or all of them by default."
+            },
+            "who": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": {
+                "role": "host"
+              },
+              "description": "Which participants the rule constrains, or every host by default."
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "params"
+          ],
+          "title": "BlackoutRule",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The gaps the new booking needs between meetings.",
+          "properties": {
+            "id": {
+              "description": "The rule's ID, unique in the request.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "clearance",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ClearanceParams",
+              "description": "The clearance parameters."
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": true,
+              "description": "Which bookings it applies to, or all of them by default."
+            },
+            "who": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": {
+                "role": "host"
+              },
+              "description": "Which participants the rule constrains, or every host by default."
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "params"
+          ],
+          "title": "ClearanceRule",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "How soon and how far ahead a booking may start.",
+          "properties": {
+            "id": {
+              "description": "The rule's ID, unique in the request.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "lead_time",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/LeadTimeParams",
+              "description": "The lead-time parameters."
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": true,
+              "description": "Which bookings it applies to, or all of them by default."
+            },
+            "who": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": {
+                "role": "host"
+              },
+              "description": "Which participants the rule constrains, or every host by default."
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "params"
+          ],
+          "title": "LeadTimeRule",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "How statuses and tags affect availability.",
+          "properties": {
+            "id": {
+              "description": "The rule's ID, unique in the request.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "status_policy",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/StatusPolicyParams",
+              "description": "The policy parameters."
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": true,
+              "description": "Which bookings it applies to, or all of them by default."
+            },
+            "who": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": {
+                "role": "host"
+              },
+              "description": "Which participants the rule constrains, or every host by default."
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "params"
+          ],
+          "title": "StatusPolicyRule",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A late finish blocks an early start.",
+          "properties": {
+            "id": {
+              "description": "The rule's ID, unique in the request.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "rest",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RestParams",
+              "description": "The rest parameters."
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": true,
+              "description": "Which bookings it applies to, or all of them by default."
+            },
+            "who": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": {
+                "role": "host"
+              },
+              "description": "Which participants the rule constrains, or every host by default."
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "params"
+          ],
+          "title": "RestRule",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A limit on how much of a period may be booked.",
+          "properties": {
+            "id": {
+              "description": "The rule's ID, unique in the request.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "cap",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/CapParams",
+              "description": "The cap parameters."
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": true,
+              "description": "Which bookings it applies to, or all of them by default."
+            },
+            "who": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Selector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": {
+                "role": "host"
+              },
+              "description": "Which participants the rule constrains, or every host by default."
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "params"
+          ],
+          "title": "CapRule",
+          "type": "object"
+        }
+      ],
+      "title": "Rule"
+    },
+    "Selector": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MatchAll"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tag": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "title": "TagSelector",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/$defs/Selector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "title": "AnySelector",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/$defs/Selector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "title": "AllSelector",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/Selector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotSelector",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "ids"
+          ],
+          "title": "IdsSelector",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "$ref": "#/$defs/Role"
+            }
+          },
+          "required": [
+            "role"
+          ],
+          "title": "RoleSelector",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ParticipantKind"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "KindSelector",
+          "type": "object"
+        }
+      ],
+      "title": "Selector"
+    },
+    "SlotCheck": {
+      "description": "The answer to checking one proposed booking.",
+      "properties": {
+        "flags": {
+          "description": "What the caller should know that does not make it invalid.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta",
+          "description": "The versions the answer was produced from."
+        },
+        "reasons": {
+          "description": "Every reason the booking fails.",
+          "items": {
+            "$ref": "#/$defs/Reason"
+          },
+          "type": "array"
+        },
+        "reserve": {
+          "description": "Travel every participant the booking needs occupies.",
+          "items": {
+            "$ref": "#/$defs/ReserveSpan"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "description": "Whether the booking can be made as proposed.",
+          "type": "boolean"
+        },
+        "warnings": {
+          "description": "The request's validation warnings.",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "valid",
+        "reasons",
+        "flags",
+        "reserve",
+        "warnings",
+        "meta"
+      ],
+      "title": "SlotCheck",
+      "type": "object"
+    },
+    "Span": {
+      "description": "A two-element array of strings: a span's start and end, or a blackout's\nlocal date-times.\n\nThe JSON spells both as an array of two strings, so the wire reads both into\none shape and leaves the meaning to the field that holds it. The array is\nread by hand rather than derived so that an array of the wrong length is one\n`invalid_length` failure naming the shape a caller can write, rather than\nserde's two spellings of the same mistake — one of which reports a\nthree-element array as a JSON syntax error.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "description": "The span's first instant, or the local date-time it starts at.",
+          "type": "string"
+        },
+        {
+          "description": "One past the span's last minute, or the local date-time it ends at.",
+          "type": "string"
+        }
+      ],
+      "title": "Span",
+      "type": "array"
+    },
+    "Status": {
+      "description": "The statuses a status-policy entry may name.\n\nA block's status is read as an open string, because a provider may report a\nvalue this layer has never seen and `busy` is the safe reading of it. An entry\nis the caller's own configuration, so a value outside this set is rejected\nwhere it is written rather than silently matched against something else.",
+      "oneOf": [
+        {
+          "const": "free",
+          "description": "Ignored by default: the participant is available.",
+          "type": "string"
+        },
+        {
+          "const": "tentative",
+          "description": "Blocks by default.",
+          "type": "string"
+        },
+        {
+          "const": "busy",
+          "description": "Blocks by default.",
+          "type": "string"
+        }
+      ],
+      "title": "Status"
+    },
+    "StatusEffect": {
+      "description": "What a matching status-policy entry does to a block.",
+      "oneOf": [
+        {
+          "const": "ignore",
+          "description": "The block is ignored.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "The block blocks.",
+          "type": "string"
+        }
+      ],
+      "title": "StatusEffect"
+    },
+    "StatusPolicyEntry": {
+      "additionalProperties": false,
+      "description": "One status-policy entry: what it matches and what it decides.",
+      "properties": {
+        "effect": {
+          "$ref": "#/$defs/StatusEffect",
+          "description": "What happens to a block the entry matches."
+        },
+        "match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The tag selector this entry matches, if it matches on tags."
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Status"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The block status this entry matches, if it matches on status.\n\nUnlike a block's `status`, this one is a closed set. A block's status is\nprovider data, where an unrecognised value has to fail safe toward busy;\nan entry is caller-authored configuration, where an unrecognised value is\na mistake. Reading one as `busy` would turn an entry meant to ignore one\nkind of event into one that ignores every busy block."
+        }
+      },
+      "required": [
+        "effect"
+      ],
+      "title": "StatusPolicyEntry",
+      "type": "object"
+    },
+    "StatusPolicyParams": {
+      "additionalProperties": false,
+      "description": "The parameters of a `status_policy` rule.",
+      "properties": {
+        "entries": {
+          "description": "The entries, in the order the caller wrote them.",
+          "items": {
+            "$ref": "#/$defs/StatusPolicyEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "title": "StatusPolicyParams",
+      "type": "object"
+    },
+    "Term": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PersonTerm",
+          "description": "One named host."
+        },
+        {
+          "$ref": "#/$defs/AtLeastTerm",
+          "description": "At least a count of hosts among the participants a selector matches."
+        }
+      ],
+      "description": "One clause of a requirement.",
+      "title": "Term"
+    },
+    "Travel": {
+      "additionalProperties": false,
+      "description": "Travel the new booking needs, in each direction, with per-participant\noverrides.",
+      "properties": {
+        "after": {
+          "description": "Travel needed after the event, for participants without an override.",
+          "type": "string"
+        },
+        "before": {
+          "description": "Travel needed before the event, for participants without an override.",
+          "type": "string"
+        },
+        "by_participant": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/ParticipantTravel"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": {},
+          "description": "Per-participant travel, keyed by participant ID."
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "title": "Travel",
+      "type": "object"
+    },
+    "WindowParams": {
+      "additionalProperties": false,
+      "description": "The parameters of a `window` rule.",
+      "properties": {
+        "dates": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": {},
+          "description": "Hours that override the weekly ones, keyed by a date or date range."
+        },
+        "weekly": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": {},
+          "description": "The hours each day key shares, keyed by a weekday list or range."
+        },
+        "zone": {
+          "description": "`participant`, `event`, or an IANA zone name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "zone"
+      ],
+      "title": "WindowParams",
+      "type": "object"
+    },
+    "WindowRule": {
+      "additionalProperties": false,
+      "description": "When bookings may happen.",
+      "properties": {
+        "id": {
+          "description": "The rule's ID, unique in the request.",
+          "type": "string"
+        },
+        "kind": {
+          "const": "window",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/WindowParams",
+          "description": "The window specification."
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Which bookings it applies to, or all of them by default."
+        },
+        "who": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": {
+            "role": "host"
+          },
+          "description": "Which participants the rule constrains, or every host by default."
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "params"
+      ],
+      "title": "WindowRule",
+      "type": "object"
+    },
+    "WorkingDaysMax": {
+      "additionalProperties": false,
+      "description": "A `lead_time` maximum written as a count of working days on a calendar.",
+      "properties": {
+        "calendar": {
+          "description": "The request calendar that decides which days are working days.",
+          "type": "string"
+        },
+        "working_days": {
+          "description": "How many working days after today remain inside the horizon.",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "working_days",
+        "calendar"
+      ],
+      "title": "WorkingDaysMax",
+      "type": "object"
+    },
+    "ZonePeriod": {
+      "additionalProperties": false,
+      "description": "A span of instants during which a participant is in another zone.",
+      "properties": {
+        "from": {
+          "description": "The first instant of the period.",
+          "type": "string"
+        },
+        "until": {
+          "description": "One past the last instant of the period.",
+          "type": "string"
+        },
+        "zone": {
+          "description": "The zone the participant is in during the period.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "zone",
+        "from",
+        "until"
+      ],
+      "title": "ZonePeriod",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

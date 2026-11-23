@@ -1,0 +1,13 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7be64a1cd3d7f5bca7cc2cfd945fffb5dd17fc2b6a2d69d81534bac2563c6e74 # shrinks to case = [(1, [("h0", 0), ("h2", 0)]), (2, [("h0", 0), ("h1", 0), ("h2", 0)])], replacement = [0, 0, -1]
+cc ba5b52efc8e37ccfcab13e8a6c4bc99cdc4fd549bace0863cdb25e6f92654483 # shrinks to case = [(1, [("h0", 0), ("h1", 0), ("h2", 0)]), (1, [("h0", 0), ("h1", 0), ("h2", 0)])]
+cc 633917d85f14b42c33a247dbc9e5f6bf9fb19a1a5c475eb662121b7525575327 # shrinks to case = [(1, [("h0", 0), ("h2", 0)]), (1, [("h0", 0), ("h1", -2)])]
+cc 9bc7edfa6e4637a9d46d2b8dce59ed89bbc92ace28e2653136d54519e8287238 # shrinks to case = [(1, [("h0", 0), ("h2", 0)]), (1, [("h0", 0), ("h1", 0)])], replacement = [2, 0]
+cc 5d5a4212bf6a668b19492dfbe98b0245ced36fe01901e3e1c7ae1fca10f42ac6 # shrinks to case = [(1, [("h0", 0), ("h1", 0), ("h2", 0)])]
+cc fc7eb397f8642c4be5da21987b73e9cc5aa47d08d5d99cccf5a43cf5192d18a9 # shrinks to case = [(1, [("h0", 0), ("h1", 0)])]
+cc b726ff5d1053358083db09d98a23ed34b845cd703676653993f9eea7674192bc # shrinks to case = [(1, [("h0", 0), ("h1", 0)])], replacement = [0]

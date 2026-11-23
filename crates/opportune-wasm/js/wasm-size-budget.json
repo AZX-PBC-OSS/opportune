@@ -1,0 +1,6 @@
+{
+  "artifact": "dist/pkg/opportune_wasm_bg.wasm",
+  "source": "pkg/opportune_wasm_bg.wasm",
+  "baselineBytes": 608415,
+  "budgetBytes": 640000
+}

@@ -1,0 +1,95 @@
+# Builds the mkdocs site and deploys it to GitHub Pages via the modern OIDC-based
+# deploy flow (actions/deploy-pages), not the legacy push-to-a-gh-pages-branch
+# approach. Runs `mkdocs build --strict` so a broken nav entry or bad link fails CI
+# instead of silently publishing a broken page.
+#
+# Rust API docs are served by docs.rs for the published crate; this site is the
+# project's guide-level documentation.
+
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "README.md"
+      - "crates/opportune-py/pyproject.toml"
+      - "crates/opportune-py/uv.lock"
+      - "crates/opportune-wasm/js/package.json"
+      - ".github/workflows/docs.yml"
+  # The same paths on a pull request, so a change that breaks `mkdocs build --strict`
+  # fails before it reaches main rather than on the deploy run that follows the merge.
+  # The build job runs on every event; only `deploy` is gated on main.
+  #
+  # README.md and the npm package's manifest are in the filter so that any documentation
+  # change re-runs the build. Neither is a site input — mkdocs reads `docs/` and
+  # mkdocs.yml only — so the build proves the site is still green on that change, not
+  # that the README's own links resolve against it; those belong to review.
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "README.md"
+      - "crates/opportune-py/pyproject.toml"
+      - "crates/opportune-py/uv.lock"
+      - "crates/opportune-wasm/js/package.json"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # Same caching discipline as ci.yml: the uv cache is keyed on the lockfile, so a
+          # docs-only change restores it and a lock change rebuilds it.
+          enable-cache: true
+      - name: Sync docs dependencies
+        # --locked: fail if uv.lock is out of date, rather than silently rewriting it.
+        # The docs group is non-default (pyproject.toml), and --no-install-project
+        # keeps mkdocs from needing the Rust extension built. mkdocs.yml lives at the
+        # repository root, next to this workflow, so the build runs from there.
+        run: uv sync --locked --group docs --no-install-project --no-default-groups --project crates/opportune-py
+      - name: Build
+        run: uv run --no-sync --project crates/opportune-py mkdocs build --strict
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      # Pages is one production environment, so two overlapping deploys race on it.
+      # Serialise rather than cancel: a cancelled in-progress deploy can leave the
+      # environment's state undefined, while a queued deploy only redeploys the commit
+      # the cancelled one was publishing.
+      #
+      # The group belongs to this job and not to the workflow, because `build` above runs
+      # for every pull request too and GitHub holds at most one *pending* run per group:
+      # a workflow-level `pages` group would let a pull-request build displace a queued
+      # deploy of an already-merged commit, which then never happens — reported as
+      # cancelled rather than failed, with the site stale until the next docs merge.
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write # Required by actions/deploy-pages to verify the deployment source.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

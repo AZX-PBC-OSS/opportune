@@ -1,0 +1,83 @@
+{
+  "id": "u20",
+  "use_case": "U20",
+  "zone": "UTC",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "UTC",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "ana"
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T13:00Z",
+        "2027-06-14T17:00Z"
+      ],
+      "zone": "UTC"
+    },
+    "now": "2027-06-14T00:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "ana",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      },
+      {
+        "id": "cand",
+        "kind": "person",
+        "role": "attendee",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "available_only:cand",
+        "kind": "window",
+        "params": {
+          "dates": {
+            "2027-06-14": [
+              "14:00-15:00",
+              "15:30-16:30"
+            ]
+          },
+          "weekly": {},
+          "zone": "UTC"
+        },
+        "when": true,
+        "who": {
+          "ids": [
+            "cand"
+          ]
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T14:00Z\",\"end\":\"2027-06-14T14:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T14:30Z\",\"end\":\"2027-06-14T15:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T15:30Z\",\"end\":\"2027-06-14T16:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T16:00Z\",\"end\":\"2027-06-14T16:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":4}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T13:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"available_only:cand\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]},{\"start\":\"2027-06-14T13:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"available_only:cand\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]},{\"start\":\"2027-06-14T15:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"available_only:cand\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]},{\"start\":\"2027-06-14T16:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"cand\",\"code\":\"outside_window\",\"rule\":\"available_only:cand\",\"tags\":[]},{\"code\":\"attendee_unavailable\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

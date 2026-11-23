@@ -1,0 +1,73 @@
+[package]
+name = "opportune-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Reference oracle, generators, scenarios and benchmark inputs for testing the opportune crate."
+# Unpublished by design: the testkit exists to test the engine and deliberately
+# avoids the engine's in-house interval and matching code, so a bug in either
+# shows up as a disagreement with the engine.
+publish = false
+
+[dependencies]
+# The `>=` floor is not decoration: cargo-deny's `wildcards = "deny"` rejects a
+# version-free path dependency. The upper bound keeps every intra-workspace
+# requirement inside one release train, as a published manifest would ask for; a
+# release crossing 0.2.0 moves it.
+opportune = { path = "../opportune", version = ">=0.1.0, <0.2.0" }
+# The golden corpus is written and re-read through the wire layer itself, so a
+# golden cannot describe a document the wire layer would not produce. `schema` is
+# enabled here only through `opportune-adapters` below, for the exporter that feeds
+# the Python codegen; the testkit's own tests use no schema.
+opportune-json = { path = "../opportune-json", version = ">=0.1.0, <0.2.0", default-features = false }
+# The combined schema the binding models are generated from is the adapters' own
+# bundle, which is the wire layer's schema with the adapter envelopes added. Only
+# `schema` is on: the exporter reads the document and converts no payload, and the
+# Windows zone mapping stays out of this graph.
+opportune-adapters = { path = "../opportune-adapters", version = ">=0.1.0, <0.2.0", default-features = false, features = [
+  "schema",
+] }
+proptest = "1"
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+criterion = "0.8"
+
+# Criterion brings its own harness, so `cargo bench` drives these directly.
+[[bench]]
+name = "workloads"
+harness = false
+
+# Without this, `cargo bench` also runs the library's unit tests in bench mode,
+# and their libtest harness rejects criterion's flags such as `--quick`.
+[lib]
+bench = false
+
+# The same for the four binaries, and for the same reason: `scenario_dump`,
+# `stress`, `export_goldens` and `export_schema` are `cargo run` targets (`make
+# determinism`, `make stress`, the golden refresh and `make codegen`), not
+# benchmarks. Declared out of the bench profile they cannot run their whole
+# workload ahead of criterion's measurements, and cannot reject `--quick` with a
+# libtest harness that has no such flag.
+[[bin]]
+name = "scenario_dump"
+bench = false
+
+[[bin]]
+name = "stress"
+bench = false
+
+[[bin]]
+name = "export_goldens"
+bench = false
+
+[[bin]]
+name = "export_schema"
+bench = false

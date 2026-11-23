@@ -1,0 +1,127 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "opportune"
+# The crate version in the workspace Cargo.toml is the single source of truth; maturin
+# supplies it to the wheel metadata, so release-please only has to bump the workspace
+# manifest and version.txt.
+dynamic = ["version"]
+description = "Calendar availability and scheduling calculations across constraints."
+readme = "README.md"
+# The support floor, not the development target: the wheel is built `cp312-abi3`, so
+# one artefact serves 3.12 through 3.15 and 3.12 is the oldest interpreter it must
+# import and behave on. `.python-version` pins the interpreter a checkout develops and
+# tests against to 3.14, and every floor below (`target-version`, pyright's
+# `pythonVersion`, and the codegen's `--target-python-version`) stays at 3.12 so the
+# toolchain keeps refusing syntax and stdlib that 3.12 cannot read.
+requires-python = ">=3.12"
+license = "MIT OR Apache-2.0"
+# maturin rejects a glob that escapes the project directory, so the crate carries
+# its own copies of the licence texts; keep them identical to the repository
+# root's LICENSE-MIT and LICENSE-APACHE.
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+authors = [{ name = "AZX, PBC.", email = "oss@azx.io" }]
+maintainers = [{ name = "AZX, PBC.", email = "oss@azx.io" }]
+keywords = ["calendar", "scheduling", "availability", "rust"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Operating System :: OS Independent",
+  "Topic :: Office/Business :: Scheduling",
+  "Typing :: Typed",
+]
+# The generated models in `python/opportune/_models.py` are Pydantic v2 models, and
+# they are part of the installed package, so pydantic is a runtime dependency of the
+# wheel rather than a tool of ours.
+dependencies = ["pydantic>=2.14"]
+
+[project.urls]
+Homepage = "https://github.com/AZX-PBC-OSS/opportune"
+Repository = "https://github.com/AZX-PBC-OSS/opportune"
+Changelog = "https://github.com/AZX-PBC-OSS/opportune/releases"
+
+[dependency-groups]
+dev = [
+  # Generates `_models.py` from the combined schema. The committed lockfile is what
+  # pins the version: its output is byte-checked by `make check-codegen`, so a bump
+  # that would change the generated file shows up as a diff rather than silently
+  # rewriting it.
+  "datamodel-code-generator>=0.98",
+  # The FastAPI suite serves the generated models from a real app, so the framework
+  # under test is a dev dependency: the wheel depends on Pydantic alone, and an
+  # application brings whichever ASGI framework it uses.
+  "fastapi>=0.165",
+  # Starlette's test client talks to `httpx2`, the maintained successor to `httpx`,
+  # and deprecation-warns on the older client. Nothing else needs either.
+  "httpx2>=2.16",
+  "pyright>=1.1.414",
+  "pytest>=9.2.0",
+  # A minor-level floor, unlike the two above, so the cooldown below can still resolve
+  # while ruff's newest patch is inside the window. `uv.lock` carries the exact version.
+  "ruff>=0.17",
+]
+# Non-default group (see default-groups below): only the docs workflow and `make
+# docs` need mkdocs, so a plain `uv sync` never pays for it.
+docs = [
+  "mkdocs>=1.6.1",
+  "mkdocs-material>=9.7.7",
+]
+
+[tool.uv]
+# Supply-chain cooldown: never resolve a release published in the last 48 hours. The
+# lockfile stays exact, so this binds when the graph is re-resolved, not on every install.
+exclude-newer = "48 hours"
+# The dev group is what a working checkout needs: the linters, the generator and the
+# FastAPI suite. Naming it means `uv sync` and `uv run` install it without an explicit
+# `--group dev`, which is what every Makefile target relies on.
+default-groups = ["dev"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "opportune._opportune"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# A warning is a finding the tool could not prove: a deprecation from Pydantic or
+# from the test client is the library telling us what the next release breaks, and
+# a warning nobody must act on is one everybody learns to scroll past. A warning
+# that is genuinely not about this package's code is filtered by class and module
+# at the test that meets it, never switched off here.
+filterwarnings = ["error"]
+# `bench_e2e.py` is the runnable 50-participant end-to-end benchmark; its `test_`
+# function is the smoke gate that proves the workload evaluates, so pytest collects
+# that file too.
+python_files = ["test_*.py", "bench_e2e.py"]
+
+[tool.ruff]
+line-length = 100
+# The oldest supported release, for the reason stated at `requires-python`: a rewrite
+# ruff offers here has to stay readable on 3.12.
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "RUF"]
+
+[tool.ruff.lint.isort]
+# `opportune` is this project's own package. Naming it is what makes the import order
+# independent of where ruff runs from: the drift check lints a generated copy in a
+# temporary directory, and without this it would sort that copy's imports differently
+# from the committed file's, failing the check on a cosmetic difference.
+known-first-party = ["opportune"]
+
+[tool.ruff.lint.per-file-ignores]
+# The generated models carry each field's schema description as one string literal,
+# which no formatter wraps, so a long one is a line the generator wrote rather than a
+# line a person chose. `make lint` and the drift check both exempt this file from the
+# column gate for that reason.
+#
+# RUF012: every generated model's optional lists and maps default to `= []` / `= {}`,
+# which Pydantic copies per instance, so no two requests share one. Ruff only recognises
+# a Pydantic model by a direct `BaseModel` base, and `_base.OpportuneModel` replaced it.
+"python/opportune/_models.py" = ["E501", "RUF012"]

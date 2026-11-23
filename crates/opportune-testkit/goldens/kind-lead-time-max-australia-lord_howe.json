@@ -1,0 +1,98 @@
+{
+  "id": "kind-lead-time-max",
+  "use_case": "lead_time",
+  "zone": "Australia/Lord_Howe",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "Australia/Lord_Howe",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "rich"
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-13T13:30Z",
+        "2027-06-15T13:30Z"
+      ],
+      "zone": "Australia/Lord_Howe"
+    },
+    "now": "2027-06-13T13:30Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [],
+        "id": "rich",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "Australia/Lord_Howe",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-17:00"
+            ],
+            "mon": [
+              "09:00-17:00"
+            ],
+            "thu": [
+              "09:00-17:00"
+            ],
+            "tue": [
+              "09:00-17:00"
+            ],
+            "wed": [
+              "09:00-17:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "horizon",
+        "kind": "lead_time",
+        "params": {
+          "max": {
+            "days": 0
+          },
+          "min": "0h"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-13T22:30Z\",\"end\":\"2027-06-13T23:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-13T23:00Z\",\"end\":\"2027-06-13T23:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-13T23:30Z\",\"end\":\"2027-06-14T00:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T00:00Z\",\"end\":\"2027-06-14T00:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T00:30Z\",\"end\":\"2027-06-14T01:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T01:00Z\",\"end\":\"2027-06-14T01:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T01:30Z\",\"end\":\"2027-06-14T02:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T02:00Z\",\"end\":\"2027-06-14T02:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T02:30Z\",\"end\":\"2027-06-14T03:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:00Z\",\"end\":\"2027-06-14T03:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:30Z\",\"end\":\"2027-06-14T04:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T04:00Z\",\"end\":\"2027-06-14T04:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T04:30Z\",\"end\":\"2027-06-14T05:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T05:00Z\",\"end\":\"2027-06-14T05:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T05:30Z\",\"end\":\"2027-06-14T06:00Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T06:00Z\",\"end\":\"2027-06-14T06:30Z\",\"eligible\":[[\"rich\"]],\"assignment\":[[\"rich\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":16},{\"date\":\"2027-06-15\",\"offers\":0}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-13T13:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T14:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T14:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T15:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T15:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T16:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T16:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T17:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T17:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T18:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T18:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T19:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T19:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T20:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T20:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T21:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T21:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-13T22:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T06:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T07:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T07:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T08:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T08:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T09:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T09:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T10:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T10:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T11:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T11:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T12:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T12:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T13:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"outside_window\",\"rule\":\"hours\",\"tags\":[]}]},{\"start\":\"2027-06-14T13:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T14:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T14:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T15:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T15:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T16:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T16:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T17:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T17:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T18:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T18:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T19:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T19:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T20:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T20:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T21:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T21:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T22:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T22:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T23:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-14T23:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T00:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T00:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T01:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T01:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T02:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T02:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T03:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T03:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T04:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T04:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T05:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T05:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T06:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T06:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T07:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T07:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T08:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T08:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T09:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T09:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T10:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T10:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T11:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T11:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T12:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T12:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]},{\"start\":\"2027-06-15T13:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"rich\",\"code\":\"lead_time_max\",\"rule\":\"horizon\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

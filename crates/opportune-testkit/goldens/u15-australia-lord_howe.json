@@ -1,0 +1,112 @@
+{
+  "id": "u15",
+  "use_case": "U15",
+  "zone": "Australia/Lord_Howe",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "Australia/Lord_Howe",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "ana"
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T19:30Z",
+        "2027-06-15T01:30Z"
+      ],
+      "zone": "Australia/Lord_Howe"
+    },
+    "now": "2027-06-13T13:30Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T08:00Z",
+              "2027-06-14T09:30Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "ana",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "Australia/Lord_Howe",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "06:00-18:00"
+            ],
+            "mon": [
+              "06:00-18:00"
+            ],
+            "sat": [
+              "06:00-18:00"
+            ],
+            "sun": [
+              "06:00-18:00"
+            ],
+            "thu": [
+              "06:00-18:00"
+            ],
+            "tue": [
+              "06:00-18:00"
+            ],
+            "wed": [
+              "06:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      },
+      {
+        "id": "rest",
+        "kind": "rest",
+        "params": {
+          "late_after": "18:00",
+          "not_before": "10:00"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T23:30Z\",\"end\":\"2027-06-15T00:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T00:00Z\",\"end\":\"2027-06-15T00:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T00:30Z\",\"end\":\"2027-06-15T01:00Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-15T01:00Z\",\"end\":\"2027-06-15T01:30Z\",\"eligible\":[[\"ana\"]],\"assignment\":[[\"ana\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-15\",\"offers\":4}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T19:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]},{\"start\":\"2027-06-14T20:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]},{\"start\":\"2027-06-14T20:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]},{\"start\":\"2027-06-14T21:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]},{\"start\":\"2027-06-14T21:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]},{\"start\":\"2027-06-14T22:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]},{\"start\":\"2027-06-14T22:30Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]},{\"start\":\"2027-06-14T23:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"rest\",\"rule\":\"rest\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

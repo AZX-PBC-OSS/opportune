@@ -1,0 +1,9 @@
+{
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "include": ["bin", "python", "tests"],
+  "extraPaths": ["python"],
+  "reportMissingTypeStubs": true,
+  "venvPath": ".",
+  "venv": ".venv"
+}

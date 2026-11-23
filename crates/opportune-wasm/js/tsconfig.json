@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2024", "esnext.disposable"],
+    "strict": true,
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedSideEffectImports": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": false,
+    "types": ["node"],
+    // No `paths` here. The published-name alias lives in `tsconfig.check.json`:
+    // Bun executes this suite's TypeScript directly and honours `paths` at
+    // runtime, which would resolve `opportune` to `src/`, where the compiled
+    // wasm module is not. With the alias out of this file, both runtimes resolve
+    // the published name through the package self-reference to `dist/`, the
+    // module a consumer gets, and only the typechecker sees `src/`.
+  },
+  "include": ["src", "examples", "tests"]
+}

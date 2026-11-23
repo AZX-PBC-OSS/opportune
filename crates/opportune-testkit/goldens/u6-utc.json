@@ -1,0 +1,137 @@
+{
+  "id": "u6",
+  "use_case": "U6",
+  "zone": "UTC",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "UTC",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "person": "ana"
+              },
+              {
+                "at_least": 1,
+                "of": {
+                  "ids": [
+                    "bo",
+                    "cy"
+                  ]
+                }
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T09:00Z",
+        "2027-06-14T11:00Z"
+      ],
+      "zone": "UTC"
+    },
+    "now": "2027-06-14T00:00Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T10:00Z",
+              "2027-06-14T10:30Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "ana",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      },
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T09:00Z",
+              "2027-06-14T10:00Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "bo",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      },
+      {
+        "calendar": [],
+        "id": "cy",
+        "kind": "person",
+        "role": "host",
+        "tags": [],
+        "zone": "UTC",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-18:00"
+            ],
+            "mon": [
+              "09:00-18:00"
+            ],
+            "sat": [
+              "09:00-18:00"
+            ],
+            "sun": [
+              "09:00-18:00"
+            ],
+            "thu": [
+              "09:00-18:00"
+            ],
+            "tue": [
+              "09:00-18:00"
+            ],
+            "wed": [
+              "09:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T09:00Z\",\"end\":\"2027-06-14T09:30Z\",\"eligible\":[[\"ana\"],[\"cy\"]],\"assignment\":[[\"ana\"],[\"cy\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T09:30Z\",\"end\":\"2027-06-14T10:00Z\",\"eligible\":[[\"ana\"],[\"cy\"]],\"assignment\":[[\"ana\"],[\"cy\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T10:30Z\",\"end\":\"2027-06-14T11:00Z\",\"eligible\":[[\"ana\"],[\"bo\",\"cy\"]],\"assignment\":[[\"ana\"],[\"bo\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":3}],\"truncated\":false,\"excluded\":[{\"start\":\"2027-06-14T10:00Z\",\"part\":\"main\",\"reasons\":[{\"participant\":\"ana\",\"code\":\"blocked\",\"tags\":[]}]}],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

@@ -1,0 +1,8 @@
+# Minimal zic source for the two-version time zone database fixture.
+#
+# From tzdata 2019b, Brazil has no daylight saving time, so every local time in
+# America/Sao_Paulo is UTC-3 all year.
+#
+# Regenerate from crates/opportune with:
+#   zic -d tests/fixtures/tzdb-2019 tests/fixtures/brazil-2019b.zi
+Zone	America/Sao_Paulo	-3:00	-	-03

@@ -1,0 +1,13 @@
+# Applies only to the `opportune` crate itself (clippy resolves the nearest
+# clippy.toml from each crate's manifest directory), so bindings and adapters
+# may still use hash-ordered containers.
+#
+# The core's responses must be byte-identical on every platform, and iteration
+# order over a hash-ordered collection is none of the things "identical" needs
+# it to be: it varies between runs, platforms and hash seeds. Ordered
+# collections (`BTreeMap`/`BTreeSet`, sorted `Vec`s) keep every iteration
+# deterministic.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "hash-ordered: use BTreeMap or a sorted Vec so iteration order is identical on every platform" },
+    { path = "std::collections::HashSet", reason = "hash-ordered: use BTreeSet or a sorted Vec so iteration order is identical on every platform" },
+]

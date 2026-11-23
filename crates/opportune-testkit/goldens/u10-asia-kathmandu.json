@@ -1,0 +1,116 @@
+{
+  "id": "u10",
+  "use_case": "U10",
+  "zone": "Asia/Kathmandu",
+  "request": {
+    "calendars": {},
+    "explain": {
+      "limit": 10000
+    },
+    "goal": {
+      "display_zone": "Asia/Kathmandu",
+      "parts": [
+        {
+          "duration": "30m",
+          "id": "main",
+          "requirement": {
+            "all": [
+              {
+                "at_least": 1,
+                "of": {
+                  "tag": "group/eng"
+                }
+              }
+            ]
+          },
+          "tags": [],
+          "travel": {
+            "after": "0h",
+            "before": "0h",
+            "by_participant": {}
+          }
+        }
+      ],
+      "search_window": [
+        "2027-06-14T03:15Z",
+        "2027-06-14T04:15Z"
+      ],
+      "zone": "Asia/Kathmandu"
+    },
+    "now": "2027-06-13T18:15Z",
+    "occurrences": [],
+    "participants": [
+      {
+        "calendar": [
+          {
+            "all_day": false,
+            "span": [
+              "2027-06-14T03:15Z",
+              "2027-06-14T03:45Z"
+            ],
+            "status": "busy",
+            "tags": []
+          }
+        ],
+        "id": "tom",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "group/eng"
+        ],
+        "zone": "Asia/Kathmandu",
+        "zone_periods": []
+      },
+      {
+        "calendar": [],
+        "id": "uma",
+        "kind": "person",
+        "role": "host",
+        "tags": [
+          "group/eng"
+        ],
+        "zone": "Asia/Kathmandu",
+        "zone_periods": []
+      }
+    ],
+    "rules": [
+      {
+        "id": "hours",
+        "kind": "window",
+        "params": {
+          "dates": {},
+          "weekly": {
+            "fri": [
+              "09:00-18:00"
+            ],
+            "mon": [
+              "09:00-18:00"
+            ],
+            "sat": [
+              "09:00-18:00"
+            ],
+            "sun": [
+              "09:00-18:00"
+            ],
+            "thu": [
+              "09:00-18:00"
+            ],
+            "tue": [
+              "09:00-18:00"
+            ],
+            "wed": [
+              "09:00-18:00"
+            ]
+          },
+          "zone": "participant"
+        },
+        "when": true,
+        "who": {
+          "role": "host"
+        }
+      }
+    ],
+    "weights": {}
+  },
+  "response": "{\"offers\":[{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:15Z\",\"end\":\"2027-06-14T03:45Z\",\"eligible\":[[\"uma\"]],\"assignment\":[[\"uma\"]],\"reserve\":[]}],\"flags\":[]},{\"events\":[{\"part\":\"main\",\"start\":\"2027-06-14T03:45Z\",\"end\":\"2027-06-14T04:15Z\",\"eligible\":[[\"tom\",\"uma\"]],\"assignment\":[[\"tom\"]],\"reserve\":[]}],\"flags\":[]}],\"dates\":[{\"date\":\"2027-06-14\",\"offers\":2}],\"truncated\":false,\"excluded\":[],\"excluded_truncated\":false,\"warnings\":[],\"meta\":{\"engine\":\"0.1.0\",\"schema\":1,\"tzdb\":\"2026f\"}}"
+}

@@ -1,0 +1,84 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p32o8nsu6u1m8b\"",
+  "summary": "bo@example.com",
+  "updated": "2027-03-01T14:25:33.118Z",
+  "timeZone": "Asia/Tokyo",
+  "accessRole": "owner",
+  "defaultReminders": [{ "method": "popup", "minutes": 10 }],
+  "nextSyncToken": "CJDUzdKmzZMDLGiPnNAGGAU=",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732722000\"",
+      "id": "bo-shared-interview-0900",
+      "status": "confirmed",
+      "created": "2027-02-01T09:05:00.000Z",
+      "updated": "2027-02-01T09:05:00.000Z",
+      "summary": "Interview: front-end round",
+      "creator": { "email": "ana@example.com" },
+      "organizer": { "email": "ana@example.com" },
+      "start": {
+        "dateTime": "2027-03-10T00:00:00+09:00",
+        "timeZone": "Asia/Tokyo"
+      },
+      "end": {
+        "dateTime": "2027-03-10T01:00:00+09:00",
+        "timeZone": "Asia/Tokyo"
+      },
+      "recurringEventId": "series-interview",
+      "originalStartTime": {
+        "dateTime": "2027-03-10T00:00:00+09:00",
+        "timeZone": "Asia/Tokyo"
+      },
+      "iCalUID": "series-interview@example.com",
+      "sequence": 2,
+      "attendees": [
+        { "email": "ana@example.com", "organizer": true, "responseStatus": "accepted" },
+        { "email": "bo@example.com", "self": true, "responseStatus": "accepted" }
+      ],
+      "reminders": { "useDefault": true },
+      "eventType": "default",
+      "transparency": "opaque",
+      "extendedProperties": {
+        "shared": { "opportune.tags": "interview/front-end" }
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3420168732722001\"",
+      "id": "bo-shared-interview-1000",
+      "status": "confirmed",
+      "created": "2027-02-01T09:06:00.000Z",
+      "updated": "2027-02-01T09:06:00.000Z",
+      "summary": "Interview: front-end round",
+      "creator": { "email": "ana@example.com" },
+      "organizer": { "email": "ana@example.com" },
+      "start": {
+        "dateTime": "2027-03-11T00:00:00+09:00",
+        "timeZone": "Asia/Tokyo"
+      },
+      "end": {
+        "dateTime": "2027-03-11T01:00:00+09:00",
+        "timeZone": "Asia/Tokyo"
+      },
+      "recurringEventId": "series-interview",
+      "originalStartTime": {
+        "dateTime": "2027-03-11T00:00:00+09:00",
+        "timeZone": "Asia/Tokyo"
+      },
+      "iCalUID": "series-interview@example.com",
+      "sequence": 2,
+      "attendees": [
+        { "email": "ana@example.com", "organizer": true, "responseStatus": "accepted" },
+        { "email": "bo@example.com", "self": true, "responseStatus": "accepted" }
+      ],
+      "reminders": { "useDefault": true },
+      "eventType": "default",
+      "transparency": "opaque",
+      "extendedProperties": {
+        "shared": { "opportune.tags": "interview/front-end" }
+      }
+    }
+  ]
+}
