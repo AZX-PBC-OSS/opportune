@@ -36,7 +36,7 @@ function gate(root, ...arguments_) {
   return spawnSync("python3", [DRIVER, "--root", root, ...arguments_], { encoding: "utf8" });
 }
 
-test("a stale TypeScript snippet fails the TypeScript lane", () => {
+test("a stale TypeScript snippet fails the TypeScript lane", { timeout: 60_000 }, () => {
   const root = mkdtempSync(join(tmpdir(), "opportune-doc-snippets-"));
   try {
     cpSync(join(ROOT, "docs"), join(root, "docs"), { recursive: true });
@@ -60,7 +60,7 @@ test("a stale TypeScript snippet fails the TypeScript lane", () => {
   }
 });
 
-test("a TypeScript snippet that stops type-checking fails the TypeScript lane", () => {
+test("a TypeScript snippet that stops type-checking fails the TypeScript lane", { timeout: 60_000 }, () => {
   const root = mkdtempSync(join(tmpdir(), "opportune-doc-snippets-"));
   try {
     cpSync(join(ROOT, "docs"), join(root, "docs"), { recursive: true });
@@ -108,7 +108,7 @@ test("a fence tagged with the language's full name is classified", () => {
   }
 });
 
-test("a stale TypeScript result assertion fails the TypeScript lane", () => {
+test("a stale TypeScript result assertion fails the TypeScript lane", { timeout: 60_000 }, () => {
   const root = mkdtempSync(join(tmpdir(), "opportune-doc-snippets-"));
   try {
     cpSync(join(ROOT, "docs"), join(root, "docs"), { recursive: true });
@@ -133,7 +133,7 @@ test("a stale TypeScript result assertion fails the TypeScript lane", () => {
   }
 });
 
-test("a TypeScript snippet cannot end the lane with success", () => {
+test("a TypeScript snippet cannot end the lane with success", { timeout: 60_000 }, () => {
   const root = mkdtempSync(join(tmpdir(), "opportune-doc-snippets-"));
   try {
     cpSync(join(ROOT, "docs"), join(root, "docs"), { recursive: true });

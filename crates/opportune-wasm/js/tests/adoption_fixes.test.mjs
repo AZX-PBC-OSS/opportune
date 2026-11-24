@@ -267,9 +267,12 @@ function declaredCodes() {
   assert.notEqual(start, -1, "vocabulary.ts declares `OpportuneErrorCode`");
   const end = source.indexOf(";", start);
   assert.notEqual(end, -1, "the `OpportuneErrorCode` union ends with a semicolon");
-  return [...source.slice(start, end).matchAll(/^\s*\|\s*"([a-z0-9_]+)"/gm)].map(
-    ([, code]) => code,
-  );
+  // Every string literal inside the declaration is a code, wherever the formatter puts it:
+  // one per line with a leading `|`, several on one line, or the first literal beside the
+  // `=`. Requiring a leading `|` per line made the extraction depend on formatting rather
+  // than on the union, which is what this case exists to read. The open tail is
+  // `(string & {})`, so it contributes no literal.
+  return [...source.slice(start, end).matchAll(/"([a-z0-9_]+)"/g)].map(([, code]) => code);
 }
 
 test("every error code the package states answers the status it is classified as", () => {
@@ -300,6 +303,26 @@ test("every error code the package states answers the status it is classified as
   for (const value of [null, undefined, {}, "invalid_request"]) {
     assert.equal(httpStatusForError(value), 500, JSON.stringify(value) ?? "undefined");
   }
+});
+
+test("a category map that is a collection is refused rather than read as no mapping", () => {
+  // The category map is a document, but `JSON.stringify` writes no members for a `Map`,
+  // so a caller who wrote `new Map([["A", "tag/a"]])` reached the engine as an empty map
+  // and every event was converted as if no category were mapped. The adapter refuses the
+  // type instead, naming the field the caller has to fix.
+  const error = thrown(() =>
+    calendarViewToBlocks(CALENDAR_VIEW, "UTC", { categoryMap: new Map([["A", "tag/a"]]) }),
+  );
+  assert.equal(error.code, "invalid_type");
+  assert.match(error.message, /categoryMap/);
+  assert.match(error.message, /not a value of type map/);
+
+  // The plain mapping is the document the adapter reads, so the rejection above is the
+  // collection and not a map field the conversion refuses.
+  assert.equal(
+    calendarViewToBlocks(CALENDAR_VIEW, "UTC", { categoryMap: { A: "tag/a" } }).status,
+    "available",
+  );
 });
 
 test("`null` on an optional builder field is that field's default", () => {

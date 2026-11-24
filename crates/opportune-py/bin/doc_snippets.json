@@ -111,6 +111,12 @@
       "mode": "run"
     },
     {
+      "id": "wasm-ts-cloudflare-worker",
+      "page": "docs/wasm.md",
+      "language": "ts",
+      "mode": "check"
+    },
+    {
       "id": "personal-link-python",
       "page": "docs/recipes.md",
       "language": "python",
@@ -232,6 +238,12 @@
     },
     {
       "id": "npm-ts-runtime",
+      "page": "crates/opportune-wasm/js/README.md",
+      "language": "ts",
+      "mode": "check"
+    },
+    {
+      "id": "npm-ts-cloudflare-worker",
       "page": "crates/opportune-wasm/js/README.md",
       "language": "ts",
       "mode": "check"

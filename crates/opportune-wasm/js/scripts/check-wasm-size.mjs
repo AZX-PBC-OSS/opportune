@@ -35,7 +35,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { gzipSync } from "node:zlib";
 
 /** The package root: this script lives in `scripts/`. */
@@ -49,8 +49,8 @@ const LEVEL = 9;
 
 /** The commands that write both files, in the order that makes them copies. */
 const BUILD =
-  "wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release && " +
-  "wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release && " +
+  "wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release --locked && " +
+  "wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release --locked && " +
   "npm --prefix crates/opportune-wasm/js run build";
 
 /** The four bytes every WebAssembly module begins with: the wasm magic `\0asm`. */
@@ -73,6 +73,25 @@ function path(value, field) {
 }
 
 /**
+ * `value` as the path the budget states, resolved under `directory` — or the failure
+ * naming the field. A budget is a committed file a reviewer reads, and a path in it
+ * decides which file is measured and therefore what the gate certifies: an absolute
+ * path, a `..` segment or a directory prefix that only looks like `dist/` would let
+ * the gate measure something this package neither builds nor ships. The comparison is
+ * on the resolved path plus a separator, so `dist-other/` does not pass as `dist/`.
+ */
+function under(value, field, directory) {
+  const base = resolve(ROOT, directory);
+  const target = resolve(ROOT, path(value, field));
+  if (!target.startsWith(base + sep)) {
+    throw new Error(
+      `${BUDGET}: \`${field}\` must name a file under \`${directory}/\`, not ${value}`,
+    );
+  }
+  return value;
+}
+
+/**
  * The committed budget: the artefact it measures, the build output it is a copy of,
  * the recorded baseline and the ceiling.
  */
@@ -83,9 +102,19 @@ function budget() {
   } catch (cause) {
     throw new Error(`${BUDGET} cannot be read: ${cause.message}`, { cause });
   }
+  const artifact = under(document.artifact, "artifact", "dist");
+  const source = under(document.source, "source", "pkg");
+  // The gate proves the two are the same bytes, so one path standing for both makes
+  // that comparison a tautology and leaves the copy it exists to check unread.
+  if (artifact === source) {
+    throw new Error(
+      `${BUDGET}: \`artifact\` and \`source\` must name different files; ` +
+        "they are the published copy and the build output it is a copy of",
+    );
+  }
   return {
-    artifact: path(document.artifact, "artifact"),
-    source: path(document.source, "source"),
+    artifact,
+    source,
     baselineBytes: byteCount(document.baselineBytes, "baselineBytes"),
     budgetBytes: byteCount(document.budgetBytes, "budgetBytes"),
   };

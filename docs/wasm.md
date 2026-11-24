@@ -21,8 +21,8 @@ Requires Node 24 or newer, or Bun 1.4.2 or newer, as `engines` in the manifest s
 To build and pack the package from a repository checkout (the first four commands run from the repo root; the last two write outside it to avoid adding an untracked `node_modules/` or root `package-lock.json`):
 
 ```sh
-wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release
-wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release
+wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release --locked
+wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release --locked
 npm --prefix crates/opportune-wasm/js ci --ignore-scripts
 npm --prefix crates/opportune-wasm/js run build
 npm pack crates/opportune-wasm/js --pack-destination /tmp --ignore-scripts
@@ -45,6 +45,69 @@ export default { serverExternalPackages: ["opportune"] };
 
 - **Pure builders with zero WebAssembly (`opportune/presets`):** if a bundle only needs rule presets, `offer*` accessors, `publicResponse`/`publicSlotCheck`, `httpStatusForError`, `isKnownStatus`, marker constants, `OpportuneError`, or generated TypeScript types, import `opportune/presets`. It loads no WebAssembly and no `node:` modules.
 - **Not claimed:** Deno and deprecated Next.js Edge (`edge-light`) are untested and not claimed.
+
+### Cloudflare Workers: compile the module in the bundle
+
+A Worker has no filesystem, so the `.wasm` must arrive as part of the bundle. Wrangler compiles a static `.wasm` import into a `WebAssembly.Module` when a `CompiledWasm` rule matches it (`fallthrough` leaves every other import on Wrangler's default rules):
+
+```jsonc
+// wrangler.jsonc
+{
+  "rules": [
+    { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
+  ]
+}
+```
+
+Then import `opportune` as usual: the `workerd` condition selects the loader that imports the precompiled module and instantiates it on the first engine call.
+
+<!-- snippet: wasm-ts-cloudflare-worker -->
+```ts
+// src/worker.ts — one engine per isolate, reused across requests
+import { Engine, OpportuneError, httpStatusForError } from "opportune";
+
+const engine = new Engine();
+
+export default {
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("POST a request document", { status: 405 });
+    }
+    try {
+      const document = (await request.json()) as Parameters<Engine["findAvailabilityJson"]>[0];
+      return new Response(engine.findAvailabilityJson(document), {
+        headers: { "content-type": "application/json" },
+      });
+    } catch (thrown) {
+      if (!(thrown instanceof OpportuneError)) throw thrown;
+      return Response.json({ code: thrown.code, message: thrown.message }, {
+        status: httpStatusForError(thrown),
+      });
+    }
+  },
+};
+```
+
+Never call `engine.free()` on a module-scoped engine: it disposes the isolate's shared WASM handle and every later request throws `engine_disposed`.
+
+### Browsers and Web Workers: initialize once
+
+A browser or generic Web Worker must call `init()` from `opportune/web` before the first engine call, passing the `.wasm` asset URL. Calling `new Engine()` first throws `OpportuneError` with code `wasm_unavailable`.
+
+```js
+// main.js or worker.js
+import { Engine } from "opportune";
+import { init } from "opportune/web";
+
+// Vite: import wasmUrl from "opportune/opportune_wasm_bg.wasm?url";
+const wasmUrl = new URL("/opportune_wasm_bg.wasm", import.meta.url);
+await init(wasmUrl);
+
+const engine = new Engine();
+console.log(engine.tzdbVersion);   // requests reuse this one handle
+```
+
+`init()` may run concurrently from more than one module: callers share one load, failures reset so a retry can succeed, and repeat calls after initialization are no-ops.
 
 ## Quickstart: one person, one meeting
 
@@ -300,7 +363,7 @@ Most of the WASM binary size comes from the bundled IANA time zone database and 
 
 | Metric | Gzipped (level 9) |
 | --- | --- |
-| Recorded baseline (`default`, `windows-zones` on) | 608,415 B |
+| Recorded baseline (`default`, `windows-zones` on) | 606,712 B |
 | Enforced CI ceiling (`budgetBytes`) | 640,000 B |
 
 Run `make wasm-size` to print live raw and gzipped sizes beside both figures and fail if the module exceeds the ceiling.
@@ -323,12 +386,14 @@ Without `windows-zones`, calendars naming a Windows time zone return an `unavail
 ## Running the test suite
 
 ```sh
-make wasm        # build the release WASM module and dist/
-make wasm-size   # check the gzipped bundle-size budget
-make test-wasm   # check the budget, run the Node test suite, and run TypeScript doc snippets
+make wasm              # build the release WASM module and dist/
+make wasm-size         # check the gzipped bundle-size budget
+make test-wasm         # check the budget, run the Node test suite, and run TypeScript doc snippets
+make test-wasm-workerd # run the same suite inside real Cloudflare workerd
+make test-wasm-web     # run the same suite in Chromium, Firefox, WebKit, and a module Web Worker
 ```
 
-`make test-wasm` also compiles and executes every classified `ts` snippet across the documentation (`make test-docs-snippets-ts` runs that lane alone).
+`make test-wasm` also type-checks every classified `ts` snippet across the documentation and executes the `run`-mode ones (`make test-docs-snippets-ts` runs that lane alone). Its `node --test` suite runs `publint` and `@arethetypeswrong/cli` (`attw`) against the packed tarball, so a manifest or declaration regression fails the lane a consumer would.
 
 Run the identical suite under Bun without rewriting any tests:
 

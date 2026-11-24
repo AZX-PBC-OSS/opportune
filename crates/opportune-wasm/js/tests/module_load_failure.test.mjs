@@ -119,16 +119,18 @@ function thrown(call) {
 /**
  * The import specifiers `text` names, as written.
  *
- * Only statements are read: a line has to begin with `import`/`export` (indentation
- * allowed), or hold a dynamic `import(…)`. A specifier written inside a doc comment is
- * a mention, not an import, and the built files carry both.
+ * Only module syntax is read: a statement line has to begin with `import`/`export` and
+ * name its target after `from`, a side-effect import has to begin with `import`, or a
+ * dynamic `import(…)` supplies one. Anything else in the file — an `export const` whose
+ * value is a string, a specifier written inside a doc comment — is a value or a mention,
+ * not an import, and the built files carry both.
  */
 function specifiers(text) {
   const named = [];
   for (const match of text.matchAll(
-    /^[ \t]*(?:import|export)\s[^\n]*?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/gm,
+    /^[ \t]*(?:import|export)\s[^\n]*?\bfrom\s*["']([^"']+)["']|^[ \t]*import\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/gm,
   )) {
-    named.push(match[1] ?? match[2]);
+    named.push(match[1] ?? match[2] ?? match[3]);
   }
   return named;
 }
@@ -346,15 +348,17 @@ test("the adapters' constants answer from a package whose module was never built
   });
 });
 
-test("the presets module graph names no Node built-in", () => {
+test("the presets module graph names no Node built-in and no bare specifier", () => {
   // The `opportune/presets` promise has two halves: no WebAssembly (the case above
-  // proves it from a package whose module is absent) and no `node:module` or any other
-  // Node built-in, so a browser bundle can parse it. The second half is the one no lane
-  // can fail: Node and Bun both provide every built-in, so a `node:` import added to
+  // proves it from a package whose module is absent) and a graph a browser bundle can
+  // resolve from the package alone. The second half is the one no lane can fail at
+  // runtime: Node and Bun both provide every built-in, so a `node:` import added to
   // `sugar.ts` or `presets.ts` would resolve under `npm test`, under `bun test`, and
   // even under the packed consumer spawned with `--conditions=browser` — and break only
-  // in the bundle the subpath exists for. The shipped graph is what a bundler parses, so
-  // the shipped graph is what is read here.
+  // in the bundle the subpath exists for. The same is true of a bare specifier: `#wasm`
+  // or a dependency name would be resolved by the loader's manifest in Node and by a
+  // bundler's rules here, not by this subpath's own relative graph. The shipped graph is
+  // what a bundler parses, so the shipped graph is what is read here.
   const presets = graph(join(DIST, "presets-entry.js"));
   const builtins = [...presets].flatMap(([file, named]) =>
     named
@@ -365,6 +369,17 @@ test("the presets module graph names no Node built-in", () => {
     builtins,
     [],
     "`opportune/presets` reaches a Node built-in, so a browser bundle cannot load it:",
+  );
+  const bare = [...presets].flatMap(([file, named]) =>
+    named
+      .filter((specifier) => !specifier.startsWith(".") && !isBuiltin(specifier))
+      .map((specifier) => `${file.slice(DIST.length + 1)} imports ${specifier}`),
+  );
+  assert.deepEqual(
+    bare,
+    [],
+    "`opportune/presets` reaches a bare specifier, so a browser bundle must resolve it " +
+      "from elsewhere rather than from the subpath's own relative graph:",
   );
   // The walk is not vacuous, and it is not reading the whole tree: the engine's own
   // loader is the one that names Node built-ins, and the same walk finds them there.

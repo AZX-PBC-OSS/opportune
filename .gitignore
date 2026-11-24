@@ -23,6 +23,8 @@ crates/opportune-wasm/js/dist/
 crates/opportune-wasm/integration/*/node_modules/
 crates/opportune-wasm/integration/*/.wrangler/
 crates/opportune-wasm/integration/*/.vitest/
+crates/opportune-wasm/integration/*/test-results/
+crates/opportune-wasm/integration/*/playwright-report/
 # The doc-snippet gate's scratch tree: it compiles the extracted snippets inside the
 # package so their imports resolve to it, and removes the tree when it finishes.
 crates/opportune-wasm/js/.doc-snippets-*/

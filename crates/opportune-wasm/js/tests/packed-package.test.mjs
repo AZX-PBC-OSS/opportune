@@ -8,8 +8,8 @@
  *
  * - `publint` checks the manifest's `files`, `exports`, `main`, `types` and `sideEffects`
  *   against the packed tree;
- * - `@arethetypeswrong/cli` packs the tarball and checks every entry point's runtime and
- *   declaration resolution under Node's ESM/CJS and bundler rules;
+ * - `@arethetypeswrong/cli` checks every entry point's runtime and declaration resolution
+ *   for the packed tarball under Node's ESM/CJS and bundler rules;
  * - `tsc` compiles two real consumer projects (no DOM, and DOM for `opportune/web`) from
  *   the installed tarball, so the declarations a consumer receives are what is checked.
  *
@@ -78,29 +78,40 @@ function succeeds(command, args, cwd, what) {
 }
 
 /**
- * The package packed into `dir` and installed there, as a consumer receives it.
+ * The package packed into `dir`, as the tarball `npm publish` uploads.
  *
- * `--pack-destination` keeps the tarball out of the checkout, and `--offline` is sound
- * because the package declares no runtime dependency. `--ignore-scripts` on both, so the
- * install runs no lifecycle script.
+ * `--pack-destination` keeps the tarball out of the checkout, and `--ignore-scripts`
+ * keeps the pack free of lifecycle scripts. The single `.tgz` is returned so callers
+ * can install it or hand the same artefact to a validator.
  */
-function installTarball(dir) {
+function packTarball(dir) {
   const packed = spawnSync(
     "npm",
     ["pack", "--pack-destination", dir, "--ignore-scripts", "--silent"],
     { cwd: PACKAGE, encoding: "utf8" },
   );
+  assert.equal(packed.error, undefined, `npm pack did not start: ${packed.error?.message}`);
   assert.equal(packed.status, 0, `npm pack failed: ${packed.stderr}`);
   const tarballs = readdirSync(dir).filter((entry) => entry.endsWith(".tgz"));
   assert.deepEqual(tarballs.length, 1, `npm pack wrote ${tarballs.join(", ") || "nothing"}`);
+  return join(dir, tarballs[0]);
+}
 
+/**
+ * The package packed into `dir` and installed there, as a consumer receives it.
+ *
+ * `--offline` is sound because the package declares no runtime dependency.
+ * `--ignore-scripts` on both, so the install runs no lifecycle script.
+ */
+function installTarball(dir) {
+  const tarball = packTarball(dir);
   const installed = spawnSync(
     "npm",
     [
       "install",
       "--prefix",
       dir,
-      join(dir, tarballs[0]),
+      tarball,
       "--offline",
       "--no-audit",
       "--no-fund",
@@ -234,26 +245,27 @@ test("publint accepts the packed manifest", () => {
   succeeds(binary("publint"), ["--strict"], PACKAGE, "publint");
 });
 
-test("arethetypeswrong accepts every entry point's declarations", () => {
-  // The declared entry points are listed explicitly: automatic discovery also picks up
-  // the `.wasm` filename that appears inside the web loader's guidance text. The
-  // `cjs-resolves-to-esm` rule is ignored on purpose — this package supports Node 24+
-  // `require(esm)`, which is proved by the CommonJS consumer case below.
+test("arethetypeswrong accepts every entry point's declarations", (t) => {
+  // The tarball is packed into a temporary directory rather than the checkout, and the
+  // validator is handed that `.tgz` directly: `--pack .` would write the tarball beside
+  // the manifest and invoke `npm pack` without `--ignore-scripts`. The declared entry
+  // points are derived from the manifest, minus the `.wasm` filename that appears inside
+  // the web loader's guidance text and is not a JS entry point. The `cjs-resolves-to-esm`
+  // rule is ignored on purpose — this package supports Node 24+ `require(esm)`, which is
+  // proved by the CommonJS consumer case below.
+  const dir = mkdtempSync(join(tmpdir(), "opportune-attw-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const tarball = packTarball(dir);
+  const entrypoints = Object.keys(MANIFEST.exports).filter((subpath) => !subpath.endsWith(".wasm"));
+  assert.notDeepEqual(entrypoints, [], "the manifest declares no JS entry point to check");
   succeeds(
     binary("attw"),
     [
-      "--pack",
-      ".",
+      tarball,
       "--profile",
       "node16",
       "--entrypoints",
-      ".",
-      "./presets",
-      "./adapters/graph",
-      "./adapters/google",
-      "./web",
-      "./package.json",
-      "./schema.json",
+      ...entrypoints,
       "--ignore-rules",
       "cjs-resolves-to-esm",
     ],
@@ -365,6 +377,9 @@ test("a CommonJS consumer builds an engine synchronously and reads the schema", 
     [
       `const pkg = require(${JSON.stringify(MANIFEST.name)});`,
       `const presets = require(${JSON.stringify(`${MANIFEST.name}/presets`)});`,
+      `const graph = require(${JSON.stringify(`${MANIFEST.name}/adapters/graph`)});`,
+      `const google = require(${JSON.stringify(`${MANIFEST.name}/adapters/google`)});`,
+      `const web = require(${JSON.stringify(`${MANIFEST.name}/web`)});`,
       `const manifest = require(${JSON.stringify(`${MANIFEST.name}/package.json`)});`,
       `const schema = require(${JSON.stringify(`${MANIFEST.name}/schema.json`)});`,
       "const engine = new pkg.Engine();",
@@ -374,6 +389,11 @@ test("a CommonJS consumer builds an engine synchronously and reads the schema", 
       "console.log(JSON.stringify({",
       "  version: pkg.VERSION,",
       "  rule: presets.businessHours().kind,",
+      "  graphMarker: graph.MARKER_TAGS,",
+      "  googleMarker: google.MARKER_TAGS,",
+      "  graphExpand: graph.EXTENDED_PROPERTY_EXPAND,",
+      "  webInit: typeof web.init,",
+      "  webDefault: typeof web.default,",
       "  manifestVersion: manifest.version,",
       "  schema: schema.$schema,",
       "  tzdb,",
@@ -392,6 +412,15 @@ test("a CommonJS consumer builds an engine synchronously and reads the schema", 
   assert.equal(required.version, MANIFEST.version);
   assert.equal(required.manifestVersion, MANIFEST.version);
   assert.equal(required.rule, "window");
+  // Every subpath waived under `cjs-resolves-to-esm` is genuinely reached by `require()`:
+  // the adapters' constants and the web entry's initialisers are read from the CommonJS
+  // namespace, so the waiver rests on a working `require(esm)` rather than an untested
+  // claim about what a resolver would do.
+  assert.equal(required.graphMarker, "opportune.tags");
+  assert.equal(required.googleMarker, "opportune.tags");
+  assert.match(required.graphExpand, /^singleValueExtendedProperties\(\$filter=/);
+  assert.equal(required.webInit, "function");
+  assert.equal(required.webDefault, "function");
   assert.equal(required.schema, "https://json-schema.org/draft/2020-12/schema");
   // The same script built an engine, read the module's own time zone database version
   // and released it, all without a tick: a build whose glue needed the asynchronous

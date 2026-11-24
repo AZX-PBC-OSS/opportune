@@ -29,6 +29,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 
 /** The gate this suite exercises, in the package it belongs to. */
 const PACKAGE = join(import.meta.dirname, "..");
@@ -261,4 +262,66 @@ test("a budget with no ceiling or no paths fails closed rather than defaulting",
       assert.match(stderr, new RegExp(field));
     });
   }
+});
+
+test("a budget that names one file as both sides fails closed", () => {
+  // `artifact` must live under `dist/` and `source` under `pkg/`, so no single path can
+  // satisfy both: the shared-path document is refused by whichever tree constraint it
+  // violates first. Both orientations are checked, so neither tree can stand in for the
+  // other, and the distinctness check behind them is belt-and-braces for a future layout.
+  for (const budget of [
+    { ...BUDGET, artifact: BUDGET.source },
+    { ...BUDGET, source: BUDGET.artifact },
+  ]) {
+    inSandbox({ module: moduleOf(1024), budget }, (root) => {
+      const { status, stderr } = gate(root);
+      assert.equal(status, 1, "one file named as both sides cannot pass the gate");
+      assert.match(stderr, /must name a file under/);
+    });
+  }
+});
+
+test("a budget path outside the two build trees fails closed", () => {
+  // The gate measures the published tree and compares it with `wasm-pack`'s output, so a
+  // path elsewhere measures a file no consumer receives (or none at all) while reporting
+  // the artefact's name. Each side's tree is pinned rather than inferred from the file.
+  for (const [field, outside] of [
+    ["artifact", "elsewhere/opportune_wasm_bg.wasm"],
+    ["source", "elsewhere/opportune_wasm_bg.wasm"],
+  ]) {
+    const required = field === "artifact" ? "dist/" : "pkg/";
+    inSandbox({ module: moduleOf(1024), budget: { ...BUDGET, [field]: outside } }, (root) => {
+      const { status, stderr } = gate(root);
+      assert.equal(status, 1, `\`${field}\` outside ${required} cannot pass the gate`);
+      assert.match(stderr, new RegExp(field), "the failure names the field");
+      assert.ok(
+        stderr.includes(required),
+        `the failure names the tree \`${required}\` the field must live under: ${stderr}`,
+      );
+    });
+  }
+});
+
+test("a zero baseline is refused as a missing measurement", () => {
+  // `baselineBytes` is advisory, but zero is not a measurement: it is the field a budget
+  // that lost its value carries, and a gate that printed it as a baseline would make a
+  // module look infinitely grown. It is validated with the ceiling rather than defaulted.
+  inSandbox({ module: moduleOf(1024), budget: { ...BUDGET, baselineBytes: 0 } }, (root) => {
+    const { status, stderr } = gate(root);
+    assert.equal(status, 1, "a zero baseline cannot pass the gate");
+    assert.match(stderr, /baselineBytes/);
+    assert.match(stderr, /positive whole number/);
+  });
+});
+
+test("a module exactly at its gzipped ceiling is inside the budget", () => {
+  // The comparison is `gzipped > budget`, so equality is the last accepted byte. A gate
+  // that used `>=` would reject a module the reviewer approved at exactly this size.
+  const module = moduleOf(1024);
+  const atCeiling = gzipSync(module, { level: 9 }).length;
+  inSandbox({ module, budget: { ...BUDGET, budgetBytes: atCeiling } }, (root) => {
+    const { status, stdout } = gate(root);
+    assert.equal(status, 0, `a module of exactly ${atCeiling} gzipped bytes was rejected:\n${stdout}`);
+    assert.match(stdout, /gzipped at level 9/);
+  });
 });

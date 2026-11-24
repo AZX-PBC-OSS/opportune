@@ -123,52 +123,61 @@ function harnessFiles(dir = join(ROOT, INTEGRATION), prefix = INTEGRATION) {
         const generated = ["node_modules", "dist", "test-results", "playwright-report"].includes(entry.name) || entry.name.startsWith(".");
         return generated ? [] : harnessFiles(join(dir, entry.name), path);
       }
-      return entry.name === "package.json" || /(?:^Makefile$|\.(?:sh|mjs|cjs|js|ya?ml)$)/.test(entry.name)
+      return entry.name === "package.json" || /(?:^Makefile$|\.(?:sh|[cm]?[jt]s|ya?ml)$)/.test(entry.name)
         ? [path]
         : [];
     })
     .sort();
 }
 
+/** Shell control operators that finish one command and can begin another. */
+const COMMAND_SEPARATORS = new Set([";", ";;", ";&", ";;&", "&", "&&", "||", "|", "|&"]);
+
 /** The commands a shell script holds, as word lists; operators split commands. */
 function shellCommands(script) {
-  // The gate only judges npm installs, so a script that cannot name one is not parsed at
-  // all: shell-quote models shell expansions and rejects a `${...}` it cannot read, which
-  // is a property of the script, not of an install.
-  if (!/\bnpm\b/.test(script)) return [];
-  // The shell deletes a backslash-newline before parsing, and a newline ends a command.
-  // Normalising both first is what makes YAML's folded and literal scalars reach the
-  // parser as the text the shell receives. `shell-quote` owns quoting, escapes,
+  // The shell deletes a backslash-newline before parsing — it joins the word, it does not
+  // insert a space — so a word split across a continuation (`np\`⏎`m ci`) cannot evade the
+  // gate as two unrelated words. Parse each remaining physical line separately: shell-quote's
+  // comment token extends to the end of its input, so replacing newlines with semicolons
+  // first would let one `#` hide every later command. `shell-quote` owns quoting, escapes,
   // substitutions and comments; this function only groups its tokens into commands.
-  const normalized = script.replace(/\\\r?\n/g, " ").replace(/\r?\n/g, ";");
-  let tokens;
-  try {
-    tokens = shellQuote.parse(normalized);
-  } catch {
-    // A script naming npm that the shell parser cannot read is one this gate cannot
-    // judge; report it as a single unsafe command rather than passing it.
-    return [[normalized]];
-  }
-  const commands = [[]];
-  for (const token of tokens) {
-    if (typeof token === "string") {
-      commands.at(-1).push(token);
-      continue;
+  //
+  // Every script is parsed, not only one naming a literal `npm`: a variable command name
+  // (`$NPM ci`) is an install too, and the variable may be set outside the script — in the
+  // workflow's `env`, or in an earlier step's exported environment. The caller judges the
+  // token lists; a script that names no install is dropped there.
+  const lines = script.replace(/\\\r?\n/g, "").split(/\r?\n/);
+  return lines.flatMap((line) => {
+    let tokens;
+    try {
+      tokens = shellQuote.parse(line);
+    } catch {
+      // A line the shell parser cannot read is one this gate cannot judge; report it as
+      // a single unparseable command rather than passing it. The caller drops it only
+      // when the line names no install.
+      return [[line]];
     }
-    if ("comment" in token) break;
-    if ("op" in token) {
-      // Only command separators split. Parentheses and redirections are part of the
-      // command they belong to: `$(JS)` arrives as `$`, `(`, `JS`, `)` tokens, and
-      // splitting there would strand the install's own subcommand in another command.
-      if ([",", ";", "&&", "||", "&", "|", ";;"].includes(token.op) && commands.at(-1).length > 0) {
-        commands.push([]);
+    const commands = [[]];
+    for (const token of tokens) {
+      if (typeof token === "string") {
+        commands.at(-1).push(token);
+        continue;
       }
-      continue;
+      if ("comment" in token) break;
+      if ("op" in token) {
+        // Parentheses and redirections stay with their command: `$(JS)` arrives as `$`,
+        // `(`, `JS`, `)` tokens, and splitting there would strand the install's own
+        // subcommand. Nested npm invocations are rejected as ambiguous below instead.
+        if (COMMAND_SEPARATORS.has(token.op) && commands.at(-1).length > 0) {
+          commands.push([]);
+        }
+        continue;
+      }
+      // A variable (`$NPM`) or a glob is a word with no literal value to read.
+      commands.at(-1).push("");
     }
-    // A variable (`$NPM`) or a glob is a word with no literal value to read.
-    commands.at(-1).push("");
-  }
-  return commands.filter((words) => words.length > 0);
+    return commands.filter((words) => words.length > 0);
+  });
 }
 
 /** The last relevant option; npm's last boolean value wins. */
@@ -180,6 +189,23 @@ function lastIgnoreScriptsOption(words) {
 function runsNpmInstall(words) {
   const command = words.join(" ");
   return /\bnpm\b/.test(command) && /\b(ci|install|i)\b/.test(command);
+}
+
+/** Whether a variable command name hides an installing subcommand after any assignments. */
+function runsDynamicInstall(words) {
+  if (/\bnpm\b/.test(words.join(" "))) return false;
+  const executable = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+  return (
+    words[executable] === "" &&
+    /\b(ci|install|i)\b/.test(words.slice(executable + 1).join(" "))
+  );
+}
+
+/** Whether one literal npm invocation owns the options in `words`. */
+function hasOneNpmInvocation(words) {
+  // shell-quote does not evaluate command/process substitution. If one token list names
+  // npm twice, an outer install's flag could be masking a nested install, so fail closed.
+  return (words.join(" ").match(/\bnpm\b/g) ?? []).length === 1;
 }
 
 /** The `run` scripts a workflow holds. */
@@ -201,6 +227,16 @@ function packageScripts(file, content) {
   return Object.values(manifest.scripts ?? {})
     .filter((command) => typeof command === "string")
     .map((text) => ({ file, text }));
+}
+
+/** A Markdown page's shell text: fenced code holds recipes whose continuations join. */
+function markdownScripts(file, content) {
+  return makefileScripts(file, content);
+}
+
+/** A source file a shell command is spawned from: every line is its own command text. */
+function sourceScripts(file, content) {
+  return content.split(/\r?\n/).map((text, index) => ({ file, line: index + 1, text }));
 }
 
 /** A Makefile's recipe lines, joined across shell continuations. */
@@ -228,33 +264,44 @@ function makefileScripts(file, content) {
  * The npm installs `files` hold, and the ones that do not skip lifecycle scripts.
  *
  * A workflow is YAML and a package manifest is JSON, so both are read with the parser
- * that owns their grammar; a Makefile recipe is shell text with backslash continuations.
- * Every script is then tokenised with the shell parser, and each install is judged on
- * the options of its own command: a flag to the left of `;`/`&&`/`|` does not make the
- * install to the right safe.
+ * that owns their grammar; a Makefile recipe is shell text with backslash continuations,
+ * and a Markdown fenced block joins them the same way. Every script is then tokenised
+ * with the shell parser, and each install is judged on the options of its own command: a
+ * flag to the left of `;`/`&&`/`|` does not make the install to the right safe.
  */
 function npmInstalls(files) {
   const installs = [];
   const offenders = [];
   for (const [file, content] of files) {
+    // Each format is read with the parser that owns it, and the branch is explicit: a
+    // Markdown page's fenced shell is the one other text format whose continuations join
+    // like a recipe's, while a source file a shell command is spawned from is read line by
+    // line. An unknown extension is not silently treated as a Makefile.
     const scripts = /(?:^|\/)package\.json$/.test(file)
       ? packageScripts(file, content)
       : /\.ya?ml$/.test(file)
         ? workflowScripts(file, content)
-        : makefileScripts(file, content);
+        : /(?:^|\/)Makefile$/.test(file)
+          ? makefileScripts(file, content)
+          : /\.md$/.test(file)
+            ? markdownScripts(file, content)
+            : sourceScripts(file, content);
     for (const { line, text } of scripts) {
       const commands = shellCommands(text);
-      const installing = commands.filter(runsNpmInstall);
-      // A word the shell expands — `NPM=npm; $NPM ci` — hides the install from every
-      // command of its own, so the script's words are read together as well: a script
-      // that names npm and an installing subcommand is a site, and with no command of
-      // its own to judge it is an unsafe one.
+      const installing = commands.filter(
+        (words) => runsNpmInstall(words) || runsDynamicInstall(words),
+      );
+      // A word the shell expands — `NPM=npm; $NPM ci` — has no literal npm name. Judge
+      // that command too, including when a separate literal install already supplied a
+      // flag; otherwise the safe command would make the dynamic one invisible.
       if (installing.length === 0 && !runsNpmInstall(commands.flat())) continue;
       const site = line === undefined ? file : `${file}:${line}`;
       installs.push(site);
       const safe =
         installing.length > 0 &&
-        installing.every((words) => lastIgnoreScriptsOption(words) === "--ignore-scripts");
+        installing.every((words) =>
+          hasOneNpmInvocation(words) && lastIgnoreScriptsOption(words) === "--ignore-scripts"
+        );
       if (!safe) offenders.push(`${site}: ${text.trim()}`);
     }
   }
@@ -453,6 +500,7 @@ test("every npm install in the repository skips dependency lifecycle scripts", (
   const harness = harnessFiles();
   const { installs, offenders } = npmInstalls([
     ["Makefile", read("Makefile")],
+    [MANIFEST, read(MANIFEST)],
     ...workflowFiles().map((file) => [file, read(file)]),
     ...harness.map((file) => [file, read(file)]),
   ]);
@@ -468,7 +516,7 @@ test("every npm install in the repository skips dependency lifecycle scripts", (
 });
 
 test("the runtime harnesses stay private, locked and outside the published package", () => {
-  // A harness installs a pinned tree of its own — Wrangler and the `workerd` binary — so it
+  // A harness installs a pinned tree of its own — `workerd` and `@cloudflare/vitest-plugin` — so it
   // must never travel in the tarball, and it must never be publishable itself. Neither is
   // enforced by anything npm does: `files` decides what the package ships, and `private`
   // is the only thing that stops an accidental `npm publish` of the harness. The directory
@@ -578,6 +626,18 @@ test("the runtime-integration CI jobs are unprivileged, bounded and fed by the p
   }
 });
 
+test("the npm-install gate reads TypeScript harness entry points", () => {
+  assert.ok(
+    harnessFiles().includes(`${INTEGRATION}/web/vitest.config.ts`),
+    "the Vitest config can spawn an install but is outside the scanner's file walk",
+  );
+  const { offenders } = npmInstalls([[
+    `${INTEGRATION}/web/vitest.config.ts`,
+    'spawnSync("npm", ["ci"]);',
+  ]]);
+  assert.equal(offenders.length, 1, "a TypeScript harness install has no --ignore-scripts");
+});
+
 test("the npm-install gate reads package scripts, not manifest prose", () => {
   const manifest = JSON.stringify({
     description: "npm install in prose is not a command",
@@ -631,6 +691,109 @@ test("a flag on one command does not make the next install safe", () => {
   const { offenders } = npmInstalls([["ci.yml", content]]);
   assert.equal(offenders.length, 1, "the install to the right of && has no flag");
 });
+
+test("an install flag cannot cover another shell-executed install", () => {
+  const commands = [
+    "npm ci --ignore-scripts |& npm install left-pad",
+    'npm ci --ignore-scripts "$(npm install left-pad)"',
+  ];
+  const counts = commands.map((command) => {
+    const content = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      `      - run: ${JSON.stringify(command)}`,
+      "",
+    ].join("\n");
+    return npmInstalls([["ci.yml", content]]).offenders.length;
+  });
+  assert.deepEqual(counts, [1, 1], "a second shell-executed install inherited the first install's flag");
+});
+
+test("a dynamic install cannot hide beside a flagged literal install", () => {
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: 'NPM=npm; npm ci --ignore-scripts; $NPM install left-pad'",
+    "",
+  ].join("\n");
+  const { offenders } = npmInstalls([["ci.yml", content]]);
+  assert.equal(offenders.length, 1, "the variable invocation inherits neither npm's name nor the literal install's flag");
+});
+
+test("a shell comment cannot hide installs on following lines", () => {
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: |",
+    "          npm ci --ignore-scripts # install the locked toolchain",
+    "          npm install left-pad",
+    "",
+  ].join("\n");
+  const { offenders } = npmInstalls([["ci.yml", content]]);
+  assert.equal(offenders.length, 1, "the install after the comment has no --ignore-scripts");
+  assert.match(offenders[0], /npm install left-pad/);
+});
+
+test("a variable installer named outside the script is still an unsafe site", () => {
+  // `$NPM` may be set by the workflow's `env` or an earlier exported step, so the script
+  // itself names no literal `npm` and no literal installing subcommand. Reading only
+  // scripts that spell `npm` would let that invocation through; the scanner parses every
+  // script and judges the variable command's own words.
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: $NPM ci",
+    "",
+  ].join("\n");
+  const { installs, offenders } = npmInstalls([["ci.yml", content]]);
+  assert.equal(installs.length, 1, "the variable command is an install site");
+  assert.equal(offenders.length, 1, "a variable install with no --ignore-scripts is unsafe");
+});
+
+test("a word split across a backslash continuation cannot evade the gate", () => {
+  // The shell deletes the backslash and the newline, so `np\`/`m ci` is `npm ci`. Joining
+  // the continuation with a space instead would leave two words that name no command and
+  // the install would be invisible.
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: |",
+    "          np\\",
+    "          m ci",
+    "",
+  ].join("\n");
+  const { installs, offenders } = npmInstalls([["ci.yml", content]]);
+  assert.equal(installs.length, 1, "the joined word names npm");
+  assert.equal(offenders.length, 1, "the joined install has no --ignore-scripts");
+});
+
+test("npm's last ignore-scripts spelling decides whether the install is safe", () => {
+  // npm reads the last boolean option, so `--no-ignore-scripts` turns the flag off and
+  // `--ignore-scripts=false` is not `--ignore-scripts`; only an explicit final
+  // `--ignore-scripts` skips dependency lifecycle scripts.
+  const commands = [
+    ["npm ci --no-ignore-scripts", 1],
+    ["npm ci --ignore-scripts=false", 1],
+    ["npm ci --no-ignore-scripts --ignore-scripts", 0],
+  ];
+  const counts = commands.map(([command]) => {
+    const content = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      `      - run: ${JSON.stringify(command)}`,
+      "",
+    ].join("\n");
+    return npmInstalls([["ci.yml", content]]).offenders.length;
+  });
+  assert.deepEqual(counts, commands.map(([, offenders]) => offenders));
+});
+
 
 test("quoted text cannot hide an install, and .yaml files are read too", () => {
   const content = [
@@ -801,7 +964,18 @@ test("nothing in the npm package's install path needs a lifecycle script", () =>
     "these locked dependencies ship an install script, so --ignore-scripts would skip it",
   );
 
-  const OWN_HOOKS = ["preinstall", "install", "postinstall", "prepare", "prepack", "prepublishOnly"];
+  const OWN_HOOKS = [
+    "preinstall",
+    "install",
+    "postinstall",
+    "prepublish",
+    "preprepare",
+    "prepare",
+    "postprepare",
+    "prepack",
+    "postpack",
+    "prepublishOnly",
+  ];
   const manifest = JSON.parse(read(MANIFEST));
   const declared = OWN_HOOKS.filter((hook) => hook in (manifest.scripts ?? {}));
   assert.deepEqual(

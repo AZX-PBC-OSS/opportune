@@ -18,8 +18,8 @@
  *
  * Two things the package promises about its own module graph are here too, because
  * both are observable only as a rejection a caller can catch: the values that would
- * otherwise be rewritten silently on their way into JSON, and the browser/Web Worker
- * entry's refusal to answer before `opportune/web` has initialised the module. The
+ * otherwise be rewritten silently on their way into JSON, and the surface the
+ * browser/Web Worker entry exposes so a caller can initialise the module. The
  * `opportune/presets` subpath is the mirror image —
  * it must load no WebAssembly at all, which `module_load_failure.test.mjs` proves from
  * a package whose module is absent.
@@ -742,33 +742,18 @@ test("an Engine handed to an adapter where a document belongs is a rejection", (
   }
 });
 
-test("the browser entry initialises explicitly instead of refusing the runtime", async () => {
+test("the browser entry exposes the explicit initialisers instead of a stub", async () => {
   // A browser or Web Worker bundle resolves the manifest's `browser`/`worker`
   // condition to the shared public entry, whose `#wasm` loader is `wasm-web.js`. What
-  // the entry must not do is answer before the application has loaded the module: the
-  // rejection names `opportune/web`'s `init()`, which is the one step a caller has to
-  // take, rather than a loader error several frames away on the first request.
+  // the entry exposes is the one step a caller has to take: `init()` and `initSync()`,
+  // with `init` as the default. The loader's own pre-init rejection and retry state
+  // machine are exercised by `web_loader.test.mjs`, which owns that module state in its
+  // own process: under Bun every test file shares one module registry, so calling the
+  // in-process web loader here would race that suite's initialisation.
   const web = await import("../dist/web.js");
   assert.equal(typeof web.init, "function", "opportune/web exports init");
   assert.equal(typeof web.initSync, "function", "opportune/web exports initSync");
   assert.equal(web.default, web.init, "opportune/web's default export is init");
-
-  const { wasmModule } = await import("../dist/wasm-web.js");
-  const error = (() => {
-    try {
-      wasmModule();
-    } catch (thrown) {
-      return thrown;
-    }
-    return assert.fail("the web loader answered before init()");
-  })();
-  assert.equal(error.name, "OpportuneError");
-  assert.equal(error.code, "wasm_unavailable");
-  assert.equal(error.path, null);
-  assert.deepEqual(error.errors, []);
-  assert.match(error.message, /opportune\/web/);
-  assert.match(error.message, /init\(/);
-  assert.match(error.message, /initSync/);
 });
 
 test("the error class is one class across the entry and the pure subpath", () => {

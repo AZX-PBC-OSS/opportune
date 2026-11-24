@@ -38,6 +38,24 @@ const convert = (node) => {
   if (Array.isArray(node)) return node.map(convert);
   if (node === null || typeof node !== "object") return node;
 
+  // A node carrying both spellings would have one of them overwritten by the loop
+  // below — silently, and only for the keyword the loop reached second, so the
+  // output would be a schema neither dialect states. The bundle is compiled by this
+  // repository, so a node that gains both is a bug to fix at the source rather than
+  // a case to guess at.
+  if (Array.isArray(node.prefixItems) && "items" in node) {
+    throw new Error(
+      "a schema node carries both `prefixItems` and `items`: the conversion " +
+        "writes one to `items` and would drop the other",
+    );
+  }
+  if ("$defs" in node && "definitions" in node) {
+    throw new Error(
+      "a schema node carries both `$defs` and `definitions`: the conversion " +
+        "renames the first to the second and would drop the other",
+    );
+  }
+
   if ("$ref" in node) {
     const siblings = Object.entries(node).filter(
       ([key]) => key !== "$ref" && key !== "default",

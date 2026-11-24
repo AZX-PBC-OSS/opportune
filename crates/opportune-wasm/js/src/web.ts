@@ -10,10 +10,19 @@
  * ```
  */
 
-export {
-  init,
-  initSync,
-  init as default,
-  type InitInput,
-  type SyncInitInput,
-} from "./wasm-web.js";
+import { init as initialize, initSync as initializeSync } from "#wasm";
+import type { InitInput, SyncInitInput } from "./wasm-web.js";
+
+export type { InitInput, SyncInitInput } from "./wasm-web.js";
+
+/** Initializes the active runtime's shared loader before any engine call. */
+export function init(input?: InitInput | Promise<InitInput>): Promise<void> {
+  return initialize(input);
+}
+
+/** Synchronously initializes the active runtime's shared loader. */
+export function initSync(options?: { module: SyncInitInput }): void {
+  initializeSync(options);
+}
+
+export { init as default };

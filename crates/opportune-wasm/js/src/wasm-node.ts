@@ -80,6 +80,16 @@ function resolutionFailure(cause: unknown): boolean {
 /** The generated module, loaded on the first call. */
 let loaded: WasmModule | undefined;
 
+/** Explicit initialization for isomorphic callers; Node/Bun load their packaged module. */
+export async function init(_input?: unknown): Promise<void> {
+  wasmModule();
+}
+
+/** Synchronous explicit initialization, sharing the root entry's lazy module. */
+export function initSync(_options?: unknown): void {
+  wasmModule();
+}
+
 /**
  * The generated module, loading it if this is the first call.
  *

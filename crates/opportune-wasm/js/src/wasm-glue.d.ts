@@ -14,6 +14,7 @@
  * nothing at run time.
  */
 
+import type { SyncInitInput } from "./wasm-web.js";
 import type { WasmModule } from "./wasm.js";
 
 export declare const WasmEngine: WasmModule["WasmEngine"];
@@ -30,12 +31,15 @@ export declare const graph_extended_property_event_key_id: WasmModule["graph_ext
 export declare const graph_extended_property_expand: WasmModule["graph_extended_property_expand"];
 
 /**
- * Instantiates the generated module from a module the bundle already compiled.
+ * Instantiates the generated module from a module the bundle already compiled, or
+ * from the raw bytes of one.
  *
- * `{ module }` is the only form this package uses: passing the `WebAssembly.Module` itself
- * keeps `workerd` from compiling at run time, which it refuses outright.
+ * `{ module }` is the form this package uses: passing the `WebAssembly.Module` itself
+ * keeps `workerd` from compiling at run time, which it refuses outright. The type is
+ * the loader's own {@link SyncInitInput}, the same union `src/wasm-web.ts` accepts, so
+ * the seam cannot narrow one side without the other failing to compile.
  */
-export declare function initSync(options: { module: WebAssembly.Module }): unknown;
+export declare function initSync(options: { module: SyncInitInput }): unknown;
 
 /**
  * The asynchronous initialiser `wasm-pack` exports by default.

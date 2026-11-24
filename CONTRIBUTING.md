@@ -28,25 +28,29 @@ Thank you for your interest in contributing to `opportune`.
 ## Common Development Commands
 
 ```console
-make install         # create the project .venv and build the Python extension
-make dev             # rebuild the Python extension after editing crates/*/src/
-make lint            # version checks, codegen drift (Python + TS), license copies, doc snippets, rustfmt, clippy, rustdoc, ruff, pyright, tsc
-make test            # cargo nextest --all-features, doctests, pytest, checked Python snippets, and Node WASM + TS snippet suites
-make test-matrix     # feature-flag combinations and wasm32 target checks
-make check           # lint + test + test-matrix + check-docs
-make codegen         # regenerate Pydantic models from the combined JSON Schema
-make codegen-ts      # regenerate TypeScript types and the packaged schema.json from the same schema
-make wasm            # build the release WASM module and npm package dist/
-make test-wasm       # build WASM, check the size budget, and run the Node suite + TS snippets
-make wasm-size       # measure the release WASM module against the gzipped budget
-make deny            # cargo-deny license, advisory, ban, and source policy
-make wheel           # build the Python sdist and wheel into dist/
-make docs            # build the documentation site with --strict
-make docs-serve      # live-reload preview of the documentation site
+make install           # create the project .venv and build the Python extension
+make dev               # rebuild the Python extension after editing crates/*/src/
+make lint              # version checks, codegen drift (Python + TS), license copies, doc snippets, rustfmt, clippy, rustdoc, ruff, pyright, tsc
+make test              # cargo nextest --all-features, doctests, pytest, checked Python snippets, and Node WASM + TS snippet suites
+make test-matrix       # feature-flag combinations and wasm32 target checks
+make check             # lint + test + test-matrix + check-docs
+make codegen           # regenerate Pydantic models from the combined JSON Schema
+make codegen-ts        # regenerate TypeScript types and the packaged schema.json from the same schema
+make wasm              # build the release WASM module and npm package dist/
+make test-wasm         # build WASM, check the size budget, run the Node suite + TS snippets, and run publint + attw on the packed tarball
+make test-wasm-workerd # run the suite inside real Cloudflare `workerd` (@cloudflare/vitest-plugin)
+make test-wasm-web     # run the suite in Chromium/Firefox/WebKit + a module Web Worker (Vitest Browser Mode + Playwright)
+make wasm-size         # measure the release WASM module against the gzipped budget
+make deny              # cargo-deny license, advisory, ban, and source policy
+make wheel             # build the Python sdist and wheel into dist/
+make docs              # build the documentation site with --strict
+make docs-serve        # live-reload preview of the documentation site
 ```
 
 ### Slow Verification Targets
 
+- `make test-wasm-workerd` builds the packed tarball into `crates/opportune-wasm/integration/workerd` and runs its Vitest suite inside real Cloudflare `workerd` via `@cloudflare/vitest-plugin`, proving the `CompiledWasm` bundle path a Worker deployment uses (local `workerd`, so no Cloudflare account or network).
+- `make test-wasm-web` installs Playwright's Chromium, Firefox, and WebKit and runs Vitest Browser Mode against the packed tarball, plus a real module Web Worker bundle. Override the browser set with `OPPORTUNE_WEB_BROWSERS=chromium`.
 - `make determinism` runs the scenario suite in two separate OS processes and compares canonical output byte-for-byte (CI gates on this in addition to the in-suite check).
 - `make stress` runs ~50,000 generated engine-vs.-oracle comparisons spanning every rule kind, multi-participant matching, caps, occurrences, rest, zone periods, and daylight-saving transitions.
 
@@ -71,7 +75,7 @@ make check     # lint, tests, feature matrix, and docs
 make deny      # license, advisory, ban, and source policy
 ```
 
-CI additionally checks the Bun test lane, two-process `make determinism`, MSRV builds, and wheel/sdist packaging.
+CI additionally checks the Bun test lane, the Cloudflare `workerd` and browser/Web Worker WASM lanes (`make test-wasm-workerd`, `make test-wasm-web`), two-process `make determinism`, MSRV builds, and wheel/sdist packaging.
 
 ### Pull Request Titles (Conventional Commits)
 

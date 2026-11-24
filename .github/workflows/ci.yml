@@ -36,7 +36,7 @@ jobs:
           for file in LICENSE-MIT LICENSE-APACHE; do
             for copy in "crates/opportune/${file}" "crates/opportune-json/${file}" \
                         "crates/opportune-adapters/${file}" "crates/opportune-py/${file}" \
-                        "crates/opportune-wasm/js/${file}"; do
+                        "crates/opportune-wasm/${file}" "crates/opportune-wasm/js/${file}"; do
               if ! cmp "${file}" "${copy}"; then
                 echo "::error::${copy} differs from ${file}; the published artefact ships the copy"
                 exit 1
@@ -473,8 +473,8 @@ jobs:
         # each wasm-pack release downloads one fixed binaryen, so its version is what
         # runs the `-Oz` pass that writes `pkg/opportune_wasm_bg.wasm`. An unpinned
         # "latest" moves that optimiser — and therefore the module's size and its glue
-        # — with no diff in this repository, against a budget whose 556,337-byte
-        # baseline was recorded from 0.15.1. Bump it deliberately, the way
+        # — with no diff in this repository, against the budget `wasm-size-budget.json`
+        # commits and the baseline it records. Bump it deliberately, the way
         # `rust-toolchain.toml` is bumped; Dependabot tracks action SHAs, not `tool:`
         # inputs.
         uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
@@ -589,7 +589,7 @@ jobs:
     # installs anything may hold `id-token: write`.
     name: Browser and Web Worker runtimes over the packed npm tarball
     needs: test-wasm
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -607,19 +607,13 @@ jobs:
           name: npm-package-tarball
           path: ${{ runner.temp }}
 
-      - name: Install Playwright browsers and their system libraries
-        # The Playwright CLI, not an npm lifecycle script: the harness installs with
-        # `--ignore-scripts`. `--with-deps` is the supported way to get the Linux
-        # libraries the three engines need on the runner.
-        working-directory: crates/opportune-wasm/integration/web
-        run: |
-          npm ci --ignore-scripts
-          npx playwright install --with-deps chromium firefox webkit
-
       - name: Run the packed tarball in three browsers and a module Web Worker
         # The target installs the harness from its committed lockfile, installs this
-        # tarball over it with the same flag, and runs Vitest Browser Mode across
-        # Chromium, Firefox, and WebKit (including a real module Web Worker).
+        # tarball over it with the same flag, then installs the three Playwright engines
+        # (`--with-deps`, so the Linux libraries they need arrive with them on this
+        # runner) and runs Vitest Browser Mode across Chromium, Firefox, and WebKit
+        # (including a real module Web Worker). The install lives in the target alone:
+        # a step here would install the same harness and browsers a second time.
         run: make test-wasm-web WEB_TARBALL="$(ls "${RUNNER_TEMP}"/opportune-*.tgz)"
 
   package:

@@ -1,6 +1,5 @@
-[graph]
-all-features = false
-no-default-features = false
+# No `[graph]` table: its `all-features`/`no-default-features` keys are inert v1
+# remnants. Feature selection is the CLI flag `cargo deny --all-features`, as CI runs.
 
 [advisories]
 version = 2

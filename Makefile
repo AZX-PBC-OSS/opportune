@@ -53,7 +53,7 @@ dev:
 # them and fails on any difference before it lints the rest.
 lint: check-version check-codegen check-codegen-ts check-docs-snippets
 	@for f in LICENSE-MIT LICENSE-APACHE; do \
-		for crate in opportune opportune-json opportune-adapters opportune-py; do \
+		for crate in opportune opportune-json opportune-adapters opportune-py opportune-wasm; do \
 			cmp "$$f" "crates/$$crate/$$f" \
 				|| { echo "crates/$$crate/$$f differs from $$f; the published artefact ships the copy"; exit 1; }; \
 		done; \
@@ -157,7 +157,10 @@ wheel:
 	uv build --project crates/opportune-py --out-dir dist
 
 deny:
-	cargo deny check
+	# --all-features matches CI's cargo-deny-action, which resolves the graph that way:
+	# a licence reachable only through a feature the default build leaves off is still
+	# in the tree an adopter compiling it in gets, so it is checked here too.
+	cargo deny --all-features check
 	# Minimal allow-list: the licence check repeated with default features off and a
 	# reduced list. The Windows zone mapping is the one dependency only a default
 	# feature reaches, so this proves a strict adopter compiling it out never
@@ -401,13 +404,17 @@ check-codegen-ts: $(JSON2TS)
 # emitting byte-identical modules and one glue per target — and `dist/` is what the
 # package publishes, so the order is load-bearing: `npm run build` bundles the compiled
 # module and both generated glues into `dist/pkg/`, and the suite answers from `dist/`,
-# under whichever runner drives it. The `web` target's ESM glue is the loader the Edge,
-# Worker and browser entries select; the `nodejs` target's CommonJS glue is the one Node
-# and Bun require lazily, and it reads and instantiates the module itself. --release is
+# under whichever runner drives it. The `web` target's ESM glue is the loader the
+# Cloudflare Worker, browser and generic Web Worker entries select; the `nodejs` target's
+# CommonJS glue is the one Node and Bun require lazily, and it reads and instantiates the
+# module itself. --release is
 # the module the size budget is measured on and the one a consumer downloads.
 wasm: $(JSON2TS)
-	wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release
-	wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release
+	# --locked on the metadata read first, then on each wasm-pack build, so the release
+	# module is compiled from the committed lockfile and cannot silently re-resolve.
+	cargo metadata --locked --format-version 1 >/dev/null
+	wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release --locked
+	wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release --locked
 	npm --prefix $(JS) run build
 
 # The budget is enforced as part of the suite target, on the same build the suite
@@ -445,7 +452,7 @@ test-wasm-workerd: $(if $(WORKERD_TARBALL),,wasm)
 	fi; \
 	npm install --prefix $(WORKERD) --no-save --ignore-scripts --offline \
 		--no-audit --no-fund --silent "$$tarball"; \
-	cd $(WORKERD) && ./node_modules/.bin/vitest run
+	npm --prefix $(WORKERD) test
 
 # Browsers and generic Web Workers: Vitest Browser Mode with Playwright drives Chromium,
 # Firefox, WebKit, and a real module Web Worker against the packed tarball. Browsers are
@@ -463,8 +470,8 @@ test-wasm-web: $(if $(WEB_TARBALL),,wasm)
 	fi; \
 	npm install --prefix $(WEB) --no-save --ignore-scripts --offline \
 		--no-audit --no-fund --silent "$$tarball"; \
-	cd $(WEB) && ./node_modules/.bin/playwright install chromium firefox webkit && \
-		./node_modules/.bin/vitest run
+	cd $(WEB) && ./node_modules/.bin/playwright install --with-deps chromium firefox webkit && \
+		npm test
 
 # The Python and TypeScript code the documentation shows is a claim the gate checks
 # against the packages a reader installs; `crates/opportune-py/bin/doc_snippets.py`

@@ -17,7 +17,7 @@
  * to recognise the failure a builder raises and to name the document it holds — and
  * importing `opportune` for either would resolve a module that is not initialised. The
  * constants are here because stamping a tag or asking a provider for an extended
- * property is a string a client-side or Edge bundle reads, with no engine behind it.
+ * property is a string a client-side bundle reads, with no engine behind it.
  *
  * ```ts
  * import { businessHours, capPerDay, MARKER_TAGS, person, singleGoal } from "opportune/presets";

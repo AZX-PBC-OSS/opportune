@@ -15,6 +15,16 @@ import { REPAIR, type WasmModule } from "./wasm.js";
 
 let loaded: WasmModule | undefined;
 
+/** Explicit initialization for isomorphic callers, using the Worker's precompiled module. */
+export async function init(_input?: unknown): Promise<void> {
+  wasmModule();
+}
+
+/** Synchronous explicit initialization, sharing the root entry's precompiled module. */
+export function initSync(_options?: unknown): void {
+  wasmModule();
+}
+
 /** Instantiates the statically bundled Worker WASM module on first use. */
 export function wasmModule(): WasmModule {
   if (loaded !== undefined) {

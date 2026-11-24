@@ -8,9 +8,10 @@
  * harnesses depend on, tested here without a browser so a regression is reported by the
  * fast suite rather than only by Playwright.
  *
- * The tests are one sequential case because the loader's state is module state: the
- * pre-init checks have to run before anything loads, the failed load has to come before
- * the retry that succeeds, and the retry leaves the module loaded for the rest.
+ * The loopback checks are one sequential case because the loader's state is module state:
+ * pre-init checks run before anything loads, failure precedes the successful retry, and
+ * that retry leaves the module loaded. The cases that need a fresh public module graph run
+ * in a separate process.
  *
  * ```sh
  * make test-wasm
@@ -18,6 +19,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -53,6 +55,79 @@ async function server() {
   };
 }
 
+/** Runs `source` against the package's public name in a fresh runtime and conditions. */
+function publicGraph(source, conditions = []) {
+  const run = spawnSync(
+    process.execPath,
+    [...conditions.map((condition) => `--conditions=${condition}`), "--input-type=module", "--eval", source],
+    { cwd: join(import.meta.dirname, ".."), encoding: "utf8", timeout: 10_000 },
+  );
+  assert.equal(run.error, undefined, `the public-graph process did not finish: ${run.error?.message}`);
+  assert.equal(run.status, 0, `the public graph failed:\n${run.stdout}${run.stderr}`);
+}
+
+test("initSync(bytes) initializes the public browser graph before any async call", () => {
+  publicGraph(`
+    import assert from "node:assert/strict";
+    import { readFileSync } from "node:fs";
+    import init, { initSync } from "opportune/web";
+    import { Engine } from "opportune";
+    import { calendarViewToBlocks } from "opportune/adapters/graph";
+
+    assert.throws(() => new Engine(), { code: "wasm_unavailable" });
+    const bytes = readFileSync(new URL("./dist/pkg/opportune_wasm_bg.wasm", import.meta.url));
+    initSync({ module: bytes });
+    await init("/a-repeat-init-must-not-fetch-this.wasm");
+    initSync();
+
+    using engine = new Engine();
+    assert.match(engine.tzdbVersion, /^\\d{4}[a-z]$/);
+    assert.equal(calendarViewToBlocks({ value: [] }, "UTC").status, "available");
+  `, ["browser"]);
+});
+
+test("opportune/web and the root share initialization under default runtime conditions", () => {
+  publicGraph(`
+    import assert from "node:assert/strict";
+    import { readFileSync } from "node:fs";
+    import { initSync } from "opportune/web";
+    import { Engine } from "opportune";
+
+    const NativeModule = WebAssembly.Module;
+    let compilations = 0;
+    WebAssembly.Module = class extends NativeModule {
+      constructor(bytes) {
+        super(bytes);
+        compilations += 1;
+      }
+    };
+    const bytes = readFileSync(new URL("./dist/pkg/opportune_wasm_bg.wasm", import.meta.url));
+    initSync({ module: bytes });
+    assert.equal(compilations, 1, "the explicit initializer did not compile the supplied bytes");
+
+    using engine = new Engine();
+    assert.match(engine.tzdbVersion, /^\\d{4}[a-z]$/);
+    assert.equal(compilations, 1, "the root initialized a second Wasm module behind opportune/web");
+  `);
+});
+
+test("opportune/web's init shares the Node loader instead of fetching a URL", () => {
+  publicGraph(`
+    import assert from "node:assert/strict";
+    import init, { initSync } from "opportune/web";
+    import { Engine } from "opportune";
+
+    // Under Node's default conditions, \`#wasm\` resolves to the packaged loader for
+    // both \`opportune/web\` and \`opportune\`, so the web initializer is that loader's
+    // explicit no-op rather than the browser loader's fetch. A URL argument must not be
+    // fetched: there is no HTTP server on the path this case passes.
+    await init("/a-node-init-must-not-fetch-this.wasm");
+    initSync();
+    using engine = new Engine();
+    assert.match(engine.tzdbVersion, /^\\d{4}[a-z]$/);
+  `);
+});
+
 test("the web loader loads once, retries after failure and never double-instantiates", async (t) => {
   const http = await server();
   t.after(() => http.close());
@@ -65,6 +140,7 @@ test("the web loader loads once, retries after failure and never double-instanti
         assert.equal(thrown.code, "wasm_unavailable");
         assert.match(thrown.message, /opportune\/web/);
         assert.match(thrown.message, /init\(/);
+        assert.match(thrown.message, /initSync/);
         return true;
       },
     );

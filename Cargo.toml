@@ -56,3 +56,9 @@ opt-level = 2
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
+
+# wasm-bindgen reads `target_features` from the crate's wasm output; stripping it
+# drops that section and makes wasm-pack warn. wasm-opt still optimises and strips
+# the final .wasm output, while opportune-py keeps `strip = "symbols"`.
+[profile.release.package.opportune-wasm]
+strip = "none"

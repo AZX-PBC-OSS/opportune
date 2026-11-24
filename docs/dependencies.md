@@ -26,7 +26,7 @@ In-house implementations are used only where general-purpose crates carry differ
 
 ## npm dependencies
 
-The `opportune` npm package has zero runtime dependencies: the compiled `.wasm` module and generated TypeScript wrapper ship inside the tarball. Everything listed in `crates/opportune-wasm/js/package.json` (`typescript`, `json-schema-to-typescript`, `@types/node`) is a `devDependency` and is omitted from the published tarball. CI installs from the committed `package-lock.json` via `npm ci --ignore-scripts`.
+The `opportune` npm package has zero runtime dependencies: the compiled `.wasm` module and generated TypeScript wrapper ship inside the tarball. Everything listed in `crates/opportune-wasm/js/package.json` (`typescript`, `json-schema-to-typescript`, `publint`, `@arethetypeswrong/cli`, `shell-quote`, `yaml`, and `@types/node`) is a `devDependency` and is omitted from the published tarball. CI installs from the committed `package-lock.json` via `npm ci --ignore-scripts`.
 
 `cargo-deny` covers the Rust crates compiled into the WASM module, while a separate weekly Dependabot lane tracks `/crates/opportune-wasm/js`.
 

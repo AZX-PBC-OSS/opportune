@@ -2,11 +2,17 @@ import {
   Engine,
   OpportuneError,
   VERSION,
+  checkSlotJson,
   defaultLimits,
   findAvailabilityJson,
+  offerToProposal,
+  requiredRangesJson,
+  validateJson,
+  type Request as OpportuneRequest,
 } from "opportune";
 import { calendarViewToBlocks } from "opportune/adapters/graph";
 import { eventsListToBlocks } from "opportune/adapters/google";
+import { businessHours, person, singleGoal } from "opportune/presets";
 
 /** The isolate's engine: built once at module scope and reused by every request. */
 const sharedEngine = new Engine();
@@ -34,7 +40,7 @@ export default {
     }
 
     if (pathname === "/availability") {
-      const document = body as Parameters<Engine["findAvailabilityJson"]>[0];
+      const document = body as OpportuneRequest;
       return Response.json({
         engineJson: sharedEngine.findAvailabilityJson(document),
         freeJson: findAvailabilityJson(document),
@@ -43,8 +49,8 @@ export default {
 
     if (pathname === "/adapters") {
       const { calendarView, eventsList, zone } = body as {
-        calendarView: unknown;
-        eventsList: unknown;
+        calendarView: string | object;
+        eventsList: string | object;
         zone: string;
       };
       return Response.json({
@@ -53,9 +59,60 @@ export default {
       });
     }
 
+    if (pathname === "/using") {
+      const document = body as OpportuneRequest;
+      let engineJson: string;
+      let released: Engine | undefined;
+      {
+        using engine = new Engine();
+        engineJson = engine.findAvailabilityJson(document);
+        released = engine;
+      }
+      if (released === undefined) {
+        throw new Error("the `using` block never built an engine");
+      }
+
+      try {
+        released.findAvailabilityJson(document);
+        return Response.json({ engineJson, disposed: false });
+      } catch (error) {
+        if (error instanceof OpportuneError) {
+          return Response.json({ engineJson, disposed: true, code: error.code });
+        }
+        throw error;
+      }
+    }
+
+    if (pathname === "/api") {
+      const document = body as OpportuneRequest;
+      const answer = sharedEngine.findAvailability(document);
+      const offer = answer.offers.at(0);
+      if (offer === undefined) {
+        throw new Error("the request produced no offer to check");
+      }
+
+      return Response.json({
+        diagnostics: validateJson(document),
+        requiredRanges: requiredRangesJson(document),
+        slotCheck: checkSlotJson(document, offerToProposal(offer)),
+        presets: {
+          businessHours: businessHours(),
+          person: person("rich"),
+          singleGoal: singleGoal(
+            "30m",
+            { all: [person("rich")] },
+            {
+              zone: "Europe/London",
+              searchWindow: ["2027-06-13T23:00Z", "2027-06-18T23:00Z"],
+            },
+          ),
+        },
+      });
+    }
+
     if (pathname === "/unknown-zone") {
       try {
-        const document = body as Parameters<Engine["findAvailabilityJson"]>[0];
+        const document = body as OpportuneRequest;
         return Response.json({ answered: sharedEngine.findAvailabilityJson(document) });
       } catch (error) {
         if (error instanceof OpportuneError) {
@@ -69,7 +126,7 @@ export default {
       const disposable = new Engine();
       disposable.free();
       try {
-        disposable.findAvailabilityJson({} as Parameters<Engine["findAvailabilityJson"]>[0]);
+        disposable.findAvailabilityJson({} as OpportuneRequest);
         return Response.json({ disposed: false });
       } catch (error) {
         if (error instanceof OpportuneError) {

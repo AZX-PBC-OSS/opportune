@@ -22,7 +22,7 @@
  * JSON Schema, and every failure is an {@link OpportuneError}.
  *
  * Importing this module instantiates no WebAssembly. Node and Bun defer loading the
- * module to the first call that needs it; Worker and Edge bundles compile their static
+ * module to the first call that needs it; Cloudflare Worker bundles compile their static
  * import eagerly but still defer instantiation. A server that imports the package for a
  * preset builder therefore never instantiates one. The version and marker constants are
  * stated in `constants.ts`, which imports nothing, and the suite pins them against the module
