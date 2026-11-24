@@ -35,9 +35,11 @@ jobs:
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # release-please's `simple` strategy bumps version.txt and the workspace
-      # Cargo.toml but touches no lockfile, so Cargo.lock still records the old
-      # workspace member versions and every --locked build on the release PR and the
-      # tag would fail. `cargo metadata` reconciles it. The Python project's
+      # Cargo.toml but touches no lockfile or intra-workspace requirement, so the
+      # release train in each crate's path dependency is reconciled first. The push's
+      # `before` SHA is the previous main, which gives the utility the old release
+      # train without another fetch or a hand-maintained version list. `cargo metadata`
+      # then reconciles Cargo.lock. The Python project's
       # `uv.lock` is the second generated lockfile in the bumped tree: `uv run
       # --locked` compares it against the release branch's sources, so it is
       # regenerated in the same step rather than left for the Python lane to fail
@@ -67,6 +69,8 @@ jobs:
       - name: Reconcile the lockfiles with the bumped version
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         run: |
+          previous="$(git show "${{ github.event.before }}":version.txt)"
+          python3 crates/opportune-testkit/bin/reconcile_workspace_versions.py --previous "${previous}"
           cargo metadata --format-version=1 > /dev/null
           uv lock --project crates/opportune-py
 
@@ -77,6 +81,9 @@ jobs:
           if ! git diff --quiet crates/opportune-py/uv.lock; then
             changed=true
           fi
+          if ! git diff --quiet -- crates/*/Cargo.toml; then
+            changed=true
+          fi
           if [ "${changed}" = "false" ]; then
             echo "Cargo.lock and uv.lock already match the bumped version"
             exit 0
@@ -84,7 +91,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock crates/opportune-py/uv.lock
+          git add Cargo.lock crates/opportune-py/uv.lock crates/*/Cargo.toml
           git commit -m "chore: reconcile the lockfiles with the release version"
           git push
 
