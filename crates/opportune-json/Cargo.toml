@@ -17,17 +17,16 @@ categories = ["date-and-time", "encoding"]
 # of serde.
 
 [dependencies]
-# The `>=` floor is not decoration: cargo-deny's `wildcards = "deny"` rejects a
-# version-free path dependency. The upper bound is what makes the published
-# requirement say which compatible releases it accepts rather than leaving the
-# next release train implicit: a consumer on 0.1.x cannot silently pick up 0.2.0.
+# The caret requirement is not decoration: cargo-deny's `wildcards = "deny"` rejects
+# a version-free path dependency. It keeps the published dependency on this release
+# train, and release-please's TOML updater moves it with the workspace version.
 # Default features are off so this crate's own `bundled-tzdb` feature decides. That
 # feature is off too: no production path in this crate reads a database — the
 # facade entry points take an engine the caller built — so a consumer embedding the
 # wire types must not carry ~400 KB of zone data it never reads. The feature exists
 # for the facade examples and the suites here, and for an adopter that wants the
 # core's default engine reachable through this crate's dependency.
-opportune = { path = "../opportune", version = ">=0.1.0, <0.2.0", default-features = false }
+opportune = { path = "../opportune", version = "0.1.0", default-features = false }
 schemars = { version = "1.2.3", optional = true }
 serde.workspace = true
 serde_json.workspace = true

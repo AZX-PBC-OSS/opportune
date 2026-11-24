@@ -27,6 +27,66 @@
           "jsonpath": "$.packages[\"\"].version"
         },
         {
+          "type": "toml",
+          "path": "crates/opportune-adapters/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-adapters/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune-json']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-json/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-py/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-py/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune-json']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-py/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune-adapters']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-testkit/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-testkit/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune-json']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-testkit/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune-adapters']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-wasm/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-wasm/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune-json']['version']"
+        },
+        {
+          "type": "toml",
+          "path": "crates/opportune-wasm/Cargo.toml",
+          "jsonpath": "$['dependencies']['opportune-adapters']['version']"
+        },
+        {
           "type": "generic",
           "path": "crates/opportune-wasm/js/src/constants.ts"
         }

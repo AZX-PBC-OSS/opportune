@@ -2090,51 +2090,6 @@ test("release-please reconciles the Python lockfile with the bumped version", ()
   );
 });
 
-test("release-please moves every workspace requirement to the new release train", () => {
-  // Intra-workspace manifests carry both a lower bound and a next-minor ceiling. The
-  // release utility must move both without touching any other requirement, or the
-  // release PR's `cargo metadata` fails before it can reconcile the lockfile.
-  const root = mkdtempSync(join(tmpdir(), "opportune-release-requirements-"));
-  try {
-    writeFileSync(join(root, "version.txt"), "0.2.0\n");
-    for (const crate of ["opportune", "opportune-json"]) {
-      const dir = join(root, "crates", crate);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        join(dir, "Cargo.toml"),
-        '[dependencies]\n' +
-          'opportune = { path = "../opportune", version = ">=0.1.0, <0.2.0" }\n' +
-          'other = { path = "../other", version = ">=0.1.0, <0.3.0" }\n',
-      );
-    }
-    const script = join(ROOT, "crates", "opportune-testkit", "bin", "reconcile_workspace_versions.py");
-    const run = spawnSync("python3", [script, "--previous", "0.1.0"], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: 30_000,
-    });
-    assert.equal(run.error, undefined, run.error?.message);
-    assert.equal(run.status, 0, `${run.stdout}${run.stderr}`);
-    for (const crate of ["opportune", "opportune-json"]) {
-      const manifest = readFileSync(join(root, "crates", crate, "Cargo.toml"), "utf8");
-      assert.match(manifest, /version = ">=0\.2\.0, <0\.3\.0"/);
-      assert.match(manifest, /other = \{ path = "\.\.\/other", version = ">=0\.1\.0, <0\.3\.0"/);
-      assert.doesNotMatch(manifest, />=0\.1\.0, <0\.2\.0/);
-    }
-
-    const before = readFileSync(join(root, "crates", "opportune", "Cargo.toml"), "utf8");
-    const repeat = spawnSync("python3", [script, "--previous", "0.2.0"], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: 30_000,
-    });
-    assert.equal(repeat.status, 0, `${repeat.stdout}${repeat.stderr}`);
-    assert.equal(readFileSync(join(root, "crates", "opportune", "Cargo.toml"), "utf8"), before);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("a stray Bun lockfile cannot be committed beside the npm one", () => {
   // The npm package is managed through npm and commits its `package-lock.json`, while the
   // manifest still declares a Bun floor because the suite runs under both runners. A stray
