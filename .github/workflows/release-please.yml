@@ -55,6 +55,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: release-please--branches--main
+          # Reconciliation reads the previous main's version.txt through the push's
+          # `before` SHA, so a shallow release-branch checkout is not enough.
+          fetch-depth: 0
           # The token that created the PR is the only one that can push to its branch.
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
 
