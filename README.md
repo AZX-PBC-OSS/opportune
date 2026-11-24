@@ -125,7 +125,7 @@ if (start !== "2027-06-14T08:00Z") throw new Error(`unexpected earliest start: $
 console.log(start);
 ```
 
-See [`docs/wasm.md`](docs/wasm.md) for runtime requirements, the JSON fast path, error handling, adapter usage, `opportune/presets` for browser/Edge bundles, and the gzipped bundle-size budget.
+See [`docs/wasm.md`](docs/wasm.md) for runtime requirements, the JSON fast path, error handling, adapter usage, `opportune/presets` for browser and Web Worker bundles, and the gzipped bundle-size budget.
 
 ## Documentation
 

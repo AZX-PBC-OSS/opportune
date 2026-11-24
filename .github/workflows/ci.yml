@@ -529,6 +529,99 @@ jobs:
         # evidence about the artefact a consumer downloads, not a second build.
         run: bun test crates/opportune-wasm/js/tests/
 
+      - name: Pack the npm tarball the runtime-integration jobs consume
+        # Those jobs need the artefact, not a second build of it: one `wasm-pack` release
+        # build, one tarball, and every runtime executed against those bytes. `npm pack`
+        # writes into `runner.temp`, so nothing is added to the checkout the other steps
+        # read — a tarball left in `dist/` would be packed by the next `npm pack`.
+        run: npm pack --pack-destination "${RUNNER_TEMP}" --ignore-scripts
+        working-directory: crates/opportune-wasm/js
+
+      - name: Upload the packed npm tarball
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-package-tarball
+          path: ${{ runner.temp }}/opportune-*.tgz
+          if-no-files-found: error
+
+  test-wasm-workerd:
+    # The Node/Bun suite cannot execute `workerd`: it refuses `WebAssembly.compile`
+    # and `new WebAssembly.Module(bytes)` and has no filesystem, so
+    # the package's `workerd` loader imports a module its bundle already compiled, and
+    # only a real build plus the real runtime can say whether that works. This job runs
+    # the packed tarball `test-wasm` uploaded rather than rebuilding it, so what it
+    # executes is the artefact a consumer installs. It holds `contents: read` and nothing
+    # else: the harness under `integration/workerd` installs Cloudflare's Vitest plugin
+    # and its `workerd` binary, and no job that installs anything may hold
+    # `id-token: write`.
+    name: Cloudflare Workers runtime over the packed npm tarball
+    needs: test-wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: Download the packed npm tarball
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package-tarball
+          path: ${{ runner.temp }}
+
+      - name: Run the packed tarball in Wrangler and real workerd
+        # The target installs the harness from its committed lockfile with `npm ci
+        # --ignore-scripts`, installs this tarball over it with the same flag, and runs
+        # Vitest with Cloudflare's Workers plugin (`@cloudflare/vitest-plugin`). No Rust
+        # toolchain and no `wasm-pack`: the tarball is the build.
+        run: make test-wasm-workerd WORKERD_TARBALL="$(ls "${RUNNER_TEMP}"/opportune-*.tgz)"
+
+  test-wasm-web:
+    # Browsers and generic Web Workers are the runtimes `test-wasm` cannot execute:
+    # Vitest Browser Mode with Playwright drives Chromium, Firefox, WebKit and a real
+    # module Web Worker against the packed tarball. This job holds `contents: read` and
+    # nothing else, because it installs a pinned Playwright/Vitest tree, and no job that
+    # installs anything may hold `id-token: write`.
+    name: Browser and Web Worker runtimes over the packed npm tarball
+    needs: test-wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: Download the packed npm tarball
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package-tarball
+          path: ${{ runner.temp }}
+
+      - name: Install Playwright browsers and their system libraries
+        # The Playwright CLI, not an npm lifecycle script: the harness installs with
+        # `--ignore-scripts`. `--with-deps` is the supported way to get the Linux
+        # libraries the three engines need on the runner.
+        working-directory: crates/opportune-wasm/integration/web
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run the packed tarball in three browsers and a module Web Worker
+        # The target installs the harness from its committed lockfile, installs this
+        # tarball over it with the same flag, and runs Vitest Browser Mode across
+        # Chromium, Firefox, and WebKit (including a real module Web Worker).
+        run: make test-wasm-web WEB_TARBALL="$(ls "${RUNNER_TEMP}"/opportune-*.tgz)"
+
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 20

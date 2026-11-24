@@ -25,9 +25,18 @@
  * The test suite compiles the packed artifact under that configuration.
  */
 
+// `#wasm` is the private conditional import `package.json#imports` resolves: one
+// accessor for every runtime, with the loader behind it chosen by condition rather than
+// in this file. The `node` and `default` conditions select the loader for Node and Bun,
+// while `workerd` selects the static precompiled Worker loader and `browser`/`worker`
+// select the explicit web initializer. Nothing at or
+// below this file names a runtime, so the API above the seam is one implementation rather
+// than one per deployment target.
+import { wasmModule } from "#wasm";
+
 import { OpportuneError, configurationRejection, reason, rejection } from "./errors.js";
 import { asRecord, documentText, optionsOf, readDocument, utf8Text } from "./json.js";
-import { translated, wasmModule, type WasmEngine } from "./wasm.js";
+import { translated, type WasmEngine } from "./wasm.js";
 import type {
   Diagnostics,
   Limits,

@@ -1,6 +1,6 @@
 # WASM and TypeScript
 
-`opportune` is also published as an npm package for Node and Bun: the same Rust engine compiled to `wasm32-unknown-unknown` with `wasm-bindgen` and wrapped in a strict TypeScript API. The IANA time zone database is bundled inside the module, so calls need no native toolchain and no `TZif` files on disk.
+`opportune` is also published as an npm package for Node 24+, Bun 1.4.2+, Cloudflare Workers (`workerd`), browsers, and generic Web Workers: the same Rust engine compiled to `wasm32-unknown-unknown` with `wasm-bindgen` and wrapped in a strict TypeScript API. The IANA time zone database is bundled inside the module, so calls need no native toolchain and no `TZif` files on disk.
 
 The binding crosses into Rust via the JSON wire format. Request and response documents match the Rust and Python surfaces byte-for-byte, verified against the committed golden corpus in `crates/opportune-testkit/goldens/`. TypeScript definitions are generated directly from the exported JSON Schema (`make codegen-ts`), keeping types in sync with the wire format. The same Draft 2020-12 bundle ships with the package as `opportune/schema.json`, exported from `package.json`, so a consumer that validates a request before sending it — with Ajv, or a provider's own validation — reads the document the engine validates against. `make check-codegen-ts` fails if the shipped file drifts from `export_schema`.
 
@@ -14,34 +14,37 @@ Install the package from npm:
 npm install opportune
 ```
 
-Requires Node 24 or newer, or Bun 1.4.2 or newer, as `engines` in the manifest states. Node 24 is the oldest release line supporting `using` and `Symbol.dispose`; CI tests the packed package on both runtimes (Node 24 and Node 26) and on Bun. A single `dist/` build serves both by resolving the `.wasm` binary via `node:module`.
+Requires Node 24 or newer, or Bun 1.4.2 or newer, as `engines` in the manifest states. Cloudflare Workers (`workerd`), browsers, and generic Web Workers are also supported through `package.json#imports["#wasm"]` and `opportune/web`, described below. Node 24 is the oldest release line supporting `using` and `Symbol.dispose`; CI tests the packed package on Node 24, Node 26, Bun 1.4.2, Cloudflare `workerd` (via `@cloudflare/vitest-plugin`), and Chromium/Firefox/WebKit plus a real module Web Worker (via Vitest Browser Mode + Playwright).
 
 ### Building from source
 
-To build and pack the package from a repository checkout (the first three commands run from the repo root; the last two write outside it to avoid adding an untracked `node_modules/` or root `package-lock.json`):
+To build and pack the package from a repository checkout (the first four commands run from the repo root; the last two write outside it to avoid adding an untracked `node_modules/` or root `package-lock.json`):
 
 ```sh
-wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg --release
-npm --prefix crates/opportune-wasm/js ci
+wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release
+wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release
+npm --prefix crates/opportune-wasm/js ci --ignore-scripts
 npm --prefix crates/opportune-wasm/js run build
-npm pack crates/opportune-wasm/js --pack-destination /tmp
-npm install --prefix /tmp/opportune-consumer /tmp/opportune-*.tgz
+npm pack crates/opportune-wasm/js --pack-destination /tmp --ignore-scripts
+npm install --ignore-scripts --prefix /tmp/opportune-consumer /tmp/opportune-*.tgz
 ```
 
-`make wasm` runs the first three steps.
+One crate is built for two targets — `wasm-pack` emits byte-identical `.wasm` files, and the package publishes **one** `.wasm` binary with both generated glues (`opportune_wasm.cjs` for Node/Bun and `opportune_wasm.js` for Workers/browsers) so each runtime uses `wasm-bindgen`'s own loader without duplicating the binary. `make wasm` runs the first four steps.
 
-### Server runtimes, Next.js, and browsers
+### Server runtimes, Cloudflare Workers, Next.js, and browsers
 
-The engine-backed entrypoints do not run in browsers or Edge workers because the loader reads `.wasm` from disk via `node:module`. The package's `exports` map routes the `browser`, `edge-light`, and `worker` conditions on `.`, `./adapters/graph`, and `./adapters/google` to a stub that throws `OpportuneError` (`code: "unsupported_runtime"`) at import time so bundlers fail fast instead of shipping broken code.
-
-In a Next.js App Router project, keep `opportune` external on the Node.js runtime (the default, not Edge):
+- **Node 24+ and Bun 1.4.2+ (`node`, `default`):** the `#wasm` loader lazily requires the CommonJS glue on the first engine call, keeping `new Engine()` and `require("opportune")` 100% synchronous with zero top-level `await`.
+- **Cloudflare Workers (`workerd`):** a Worker has no filesystem and `workerd` refuses runtime `WebAssembly.compile` / `new WebAssembly.Module(bytes)`. Under the `workerd` condition, `#wasm` statically imports `./pkg/opportune_wasm_bg.wasm` (precompiled at bundle time via a `CompiledWasm` rule in `wrangler.jsonc`) and instantiates it lazily via `initSync({ module })` on the first engine call. Build one module-scoped `Engine` per isolate and reuse it across requests. Verified in real `workerd` via `make test-wasm-workerd`.
+- **Browsers and generic Web Workers (`browser`, `worker`):** call `await init(wasmUrl)` (or `initSync({ module })`) from `opportune/web` once before calling the engine, passing the `.wasm` asset URL (exported as `opportune/opportune_wasm_bg.wasm`, e.g., `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"` in Vite). Calling the engine before initialization throws `OpportuneError` (`code: "wasm_unavailable"`). Concurrent `init()` calls share one load, failures reset cleanly for retry, and repeat calls after initialization are no-ops. Verified in Chromium, Firefox, WebKit, and a real module Web Worker via `make test-wasm-web`.
+- **Next.js App Router:** keep `opportune` on the Node.js runtime (not legacy Edge) and mark it external in `next.config.mjs`:
 
 ```js
 // next.config.mjs
 export default { serverExternalPackages: ["opportune"] };
 ```
 
-If a browser, Edge, or client component bundle needs rule presets, `offer*` accessors, `publicResponse`/`publicSlotCheck`, `httpStatusForError`, `isKnownStatus`, marker constants, `OpportuneError`, or generated TypeScript types — without calling the engine — import `opportune/presets`. That subpath is pure TypeScript with no WebAssembly and no `node:` imports.
+- **Pure builders with zero WebAssembly (`opportune/presets`):** if a bundle only needs rule presets, `offer*` accessors, `publicResponse`/`publicSlotCheck`, `httpStatusForError`, `isKnownStatus`, marker constants, `OpportuneError`, or generated TypeScript types, import `opportune/presets`. It loads no WebAssembly and no `node:` modules.
+- **Not claimed:** Deno and deprecated Next.js Edge (`edge-light`) are untested and not claimed.
 
 ## Quickstart: one person, one meeting
 
@@ -303,12 +306,16 @@ Most of the WASM binary size comes from the bundled IANA time zone database and 
 Run `make wasm-size` to print live raw and gzipped sizes beside both figures and fail if the module exceeds the ceiling.
 
 Compiling without `windows-zones` drops the `Unicode-DFS-2016` CLDR dependency
-(verified by `deny.minimal.toml`) and produces a smaller module; measure your own
-build with `make wasm-size` if that trade matters:
+(verified by `deny.minimal.toml`) and produces a smaller module. To weigh that trade
+yourself, build both targets without the feature and run the size gate over the result:
 
 ```sh
-wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg --release \
+wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release \
   --no-default-features
+wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release \
+  --no-default-features
+npm --prefix crates/opportune-wasm/js run build
+node crates/opportune-wasm/js/scripts/check-wasm-size.mjs
 ```
 
 Without `windows-zones`, calendars naming a Windows time zone return an `unavailable` outcome with `zone_unknown` instead of guessing an offset.

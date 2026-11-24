@@ -894,6 +894,97 @@ test("andWho narrows the wire's default host selector instead of replacing it", 
   }
 });
 
+test("andWho and exceptWho carry a malformed who to the engine instead of throwing", () => {
+  const hours = businessHours("mon-fri", "09:00-17:00", { zone: "UTC" });
+  const people = { kind: "person" };
+
+  // A JavaScript caller is not type-checked, so `who` is whatever the caller's
+  // variable held. The narrowing reads `who` with the `in` operator, which throws
+  // a raw TypeError on every primitive, so the shape is confirmed before it is
+  // read — and a value that is not a selector object is carried through
+  // untouched, for the engine's structured validation to reject at the field the
+  // caller wrote.
+  for (const who of [0, false, "host", 1n, ["vip"]]) {
+    for (const narrow of [andWho, exceptWho]) {
+      const rule = narrow({ ...hours, who }, people);
+      assert.deepEqual(rule.who, who, `${narrow.name} kept the who it was given`);
+      assert.equal(rule.kind, "window", `${narrow.name} kept the rule's kind`);
+      assert.equal(rule.id, hours.id, `${narrow.name} kept the rule's ID`);
+    }
+  }
+
+  // A null-prototype object is a selector the caller wrote, not a malformed one:
+  // it is read and wrapped like any other.
+  const plain = Object.assign(Object.create(null), { ids: ["ana"] });
+  assert.deepEqual(andWho({ ...hours, who: plain }, people).who, { all: [plain, people] });
+  assert.deepEqual(exceptWho({ ...hours, who: plain }, people).who, {
+    all: [plain, { not: people }],
+  });
+
+  // The carried value does reach structured validation: the engine rejects the
+  // rule with an OpportuneError naming the selector it wanted, not a TypeError
+  // from the preset. (BigInt is left to the preset layer above: it does not
+  // survive JSON serialization to reach the engine at all.)
+  const booking = (rules) => ({
+    now: "2027-06-14T00:00Z",
+    goal: singleGoal("30m", { all: [person("ana")] }, {
+      zone: "UTC",
+      searchWindow: ["2027-06-15T07:00Z", "2027-06-15T07:30Z"],
+      candidates: ["2027-06-15T07:00Z"],
+    }),
+    participants: [{ id: "ana", zone: "UTC", calendar: [] }],
+    rules,
+  });
+  const cases = [
+    [0, "invalid_type"],
+    [false, "invalid_value"],
+    ["host", "invalid_type"],
+    [["vip"], "invalid_type"],
+  ];
+  for (const [who, code] of cases) {
+    const error = rejection(() => findAvailability(booking([{ ...rest("22:00", "08:00"), who }])));
+    assert.ok(
+      error instanceof OpportuneError,
+      `who ${String(who)} reached the engine's structured validation, not a ${error?.constructor?.name}`,
+    );
+    assert.equal(error.code, code, `who ${String(who)}`);
+    assert.match(error.message, /selector/, `who ${String(who)}`);
+  }
+
+  // A function or a symbol is the one malformed value the engine can never judge:
+  // `JSON.stringify` drops the object member holding it, so the wire reads the absent
+  // `who` as its own `{ role: "host" }` default and answers a rule the caller never
+  // wrote — the narrowing silently gone, a resource room it was meant to keep out
+  // still in, and nothing failing. Both entry points refuse it structurally instead,
+  // whichever argument carries it.
+  for (const unspellable of [() => true, Symbol("vip")]) {
+    for (const narrow of [andWho, exceptWho]) {
+      const rejected = rejection(() => narrow({ ...hours, who: unspellable }, people));
+      assert.ok(
+        rejected instanceof OpportuneError,
+        `${narrow.name} refused a who the wire cannot carry, not a ${rejected?.constructor?.name}`,
+      );
+      assert.equal(rejected.code, "invalid_type", `${narrow.name} with an unspellable who`);
+      assert.match(rejected.message, /`who`/, `${narrow.name} names the field it refused`);
+    }
+    // A rule whose own `who` is `true` returns the selector bare, so an unspellable one
+    // would vanish the same way and leave the rule at the wire's default.
+    const rejected = rejection(() => andWho({ ...hours, who: true }, unspellable));
+    assert.ok(rejected instanceof OpportuneError, String(rejected?.constructor?.name));
+    assert.equal(rejected.code, "invalid_type", "andWho with an unspellable selector");
+    assert.match(rejected.message, /`selector`/, "andWho names the argument it refused");
+  }
+
+  // `exceptWho` wraps its selector before `andWho` reads it, so an unspellable one
+  // reaches the engine as `{ not: }` — an object naming no selector — and fails closed
+  // there rather than at the preset. What it must never do is be silently accepted.
+  const wrapped = rejection(() =>
+    findAvailability(booking([exceptWho({ ...hours, who: true }, () => true)])),
+  );
+  assert.ok(wrapped instanceof OpportuneError, String(wrapped));
+  assert.equal(wrapped.code, "invalid_value", "exceptWho's wrapped selector is no selector");
+});
+
 test("andWho keeps a host rule off a resource room and off an attendee", () => {
   // Everyone here finished late on Monday, so a `rest` rule's reach is exactly what
   // decides whether Tuesday's 07:00 start is offered: with the default `who` the rule

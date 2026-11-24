@@ -101,7 +101,7 @@ Install the npm package (Node 24+ or Bun 1.4.2+):
 npm install opportune
 ```
 
-See [WASM and TypeScript](wasm.md) for runtime support, adapter usage, browser/Edge presets (`opportune/presets`), and the bundle-size budget.
+See [WASM and TypeScript](wasm.md) for runtime support, adapter usage, browser and Web Worker presets (`opportune/presets`), and the bundle-size budget.
 
 ### Building from source
 

@@ -8,11 +8,21 @@ rustc-ice-*.txt
 # unanchored below; the js path is listed again so the rule reads where the
 # artefact actually lands without hunting the Python block. wasm-pack's
 # `--out-dir js/pkg` writes beside the package manifest, so the binding's
-# bundle is excluded there as well as at wasm-pack's own default location.
+# bundle is excluded there as well as at wasm-pack's own default location, and
+# `--out-dir js/pkg-node` is the same build for the CommonJS target.
 crates/opportune-wasm/pkg/
 crates/opportune-wasm/js/pkg/
+crates/opportune-wasm/js/pkg-node/
 crates/opportune-wasm/js/node_modules/
 crates/opportune-wasm/js/dist/
+# The runtime-integration harnesses under `integration/` are private to `make
+# test-wasm-*` and to the CI jobs that run them: each carries its own committed
+# lockfile, installs into its own `node_modules`, and writes temporary test state
+# beside its config (`.wrangler/`, `.vitest/`). None of it is part of the published
+# package, which ships only `crates/opportune-wasm/js/dist/`.
+crates/opportune-wasm/integration/*/node_modules/
+crates/opportune-wasm/integration/*/.wrangler/
+crates/opportune-wasm/integration/*/.vitest/
 # The doc-snippet gate's scratch tree: it compiles the extracted snippets inside the
 # package so their imports resolve to it, and removes the tree when it finishes.
 crates/opportune-wasm/js/.doc-snippets-*/

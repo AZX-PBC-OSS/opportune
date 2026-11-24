@@ -47,20 +47,28 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import test from "node:test";
+import shellQuote from "shell-quote";
+import { parse as parseYaml } from "yaml";
 
 /** This suite sits at `crates/opportune-wasm/js/tests`, so the root is four levels up. */
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
+
+/** The npm package the build and release gates run against. */
+const JS_PACKAGE = join(ROOT, "crates", "opportune-wasm", "js");
 
 /** The npm package's manifest, lockfile and pure constants module. */
 const MANIFEST = "crates/opportune-wasm/js/package.json";
@@ -80,10 +88,177 @@ const VERSION_SOURCES = [
 const read = (path) => readFileSync(join(ROOT, path), "utf8");
 
 /** Every workflow file, as repository-relative paths. */
-function workflowFiles() {
-  return readdirSync(join(ROOT, ".github", "workflows"))
-    .filter((name) => name.endsWith(".yml"))
-    .map((name) => `.github/workflows/${name}`);
+function workflowFiles(
+  dir = join(ROOT, ".github", "workflows"),
+  prefix = ".github/workflows",
+) {
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+    .sort()
+    .map((name) => `${prefix}/${name}`);
+}
+
+/** The directory the runtime-integration harnesses live in. */
+const INTEGRATION = "crates/opportune-wasm/integration";
+
+/**
+ * Every harness file an npm install could be written into, as repository-relative paths.
+ *
+ * A harness is a private npm project with its own lockfile, so its installs are its own
+ * concern — and the repository has one rule for every install in it, not one rule for the
+ * Makefile and another for a tree the Makefile happens to call. Lockfiles are data and are
+ * skipped. A manifest is included for its `scripts`, which npm hands to a shell; the scanner
+ * reads those values rather than treating prose elsewhere in the JSON as commands.
+ */
+function harnessFiles(dir = join(ROOT, INTEGRATION), prefix = INTEGRATION) {
+  if (!existsSync(dir)) {
+    return [];
+  }
+  return readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) {
+        // Installs and build output are not harness sources: `node_modules`, esbuild's
+        // `dist`, Vitest's caches and Playwright's reports are all generated trees.
+        const generated = ["node_modules", "dist", "test-results", "playwright-report"].includes(entry.name) || entry.name.startsWith(".");
+        return generated ? [] : harnessFiles(join(dir, entry.name), path);
+      }
+      return entry.name === "package.json" || /(?:^Makefile$|\.(?:sh|mjs|cjs|js|ya?ml)$)/.test(entry.name)
+        ? [path]
+        : [];
+    })
+    .sort();
+}
+
+/** The commands a shell script holds, as word lists; operators split commands. */
+function shellCommands(script) {
+  // The gate only judges npm installs, so a script that cannot name one is not parsed at
+  // all: shell-quote models shell expansions and rejects a `${...}` it cannot read, which
+  // is a property of the script, not of an install.
+  if (!/\bnpm\b/.test(script)) return [];
+  // The shell deletes a backslash-newline before parsing, and a newline ends a command.
+  // Normalising both first is what makes YAML's folded and literal scalars reach the
+  // parser as the text the shell receives. `shell-quote` owns quoting, escapes,
+  // substitutions and comments; this function only groups its tokens into commands.
+  const normalized = script.replace(/\\\r?\n/g, " ").replace(/\r?\n/g, ";");
+  let tokens;
+  try {
+    tokens = shellQuote.parse(normalized);
+  } catch {
+    // A script naming npm that the shell parser cannot read is one this gate cannot
+    // judge; report it as a single unsafe command rather than passing it.
+    return [[normalized]];
+  }
+  const commands = [[]];
+  for (const token of tokens) {
+    if (typeof token === "string") {
+      commands.at(-1).push(token);
+      continue;
+    }
+    if ("comment" in token) break;
+    if ("op" in token) {
+      // Only command separators split. Parentheses and redirections are part of the
+      // command they belong to: `$(JS)` arrives as `$`, `(`, `JS`, `)` tokens, and
+      // splitting there would strand the install's own subcommand in another command.
+      if ([",", ";", "&&", "||", "&", "|", ";;"].includes(token.op) && commands.at(-1).length > 0) {
+        commands.push([]);
+      }
+      continue;
+    }
+    // A variable (`$NPM`) or a glob is a word with no literal value to read.
+    commands.at(-1).push("");
+  }
+  return commands.filter((words) => words.length > 0);
+}
+
+/** The last relevant option; npm's last boolean value wins. */
+function lastIgnoreScriptsOption(words) {
+  return words.filter((word) => /^--(?:no-)?ignore-scripts(?:=.*)?$/.test(word)).at(-1);
+}
+
+/** Whether `words` invoke npm with one of its installing subcommands. */
+function runsNpmInstall(words) {
+  const command = words.join(" ");
+  return /\bnpm\b/.test(command) && /\b(ci|install|i)\b/.test(command);
+}
+
+/** The `run` scripts a workflow holds. */
+function workflowScripts(file, content) {
+  const workflow = parseYaml(content);
+  assert.equal(typeof workflow, "object", `${file} is a YAML document`);
+  const scripts = [];
+  for (const job of Object.values(workflow.jobs ?? {})) {
+    for (const step of job?.steps ?? []) {
+      if (typeof step?.run === "string") scripts.push({ file, text: step.run });
+    }
+  }
+  return scripts;
+}
+
+/** A package manifest's `scripts` values, and nothing else in the file. */
+function packageScripts(file, content) {
+  const manifest = JSON.parse(content);
+  return Object.values(manifest.scripts ?? {})
+    .filter((command) => typeof command === "string")
+    .map((text) => ({ file, text }));
+}
+
+/** A Makefile's recipe lines, joined across shell continuations. */
+function makefileScripts(file, content) {
+  const units = [];
+  let current;
+  for (const [index, raw] of content.split("\n").entries()) {
+    const text = raw.replace(/\r$/, "");
+    current ??= { file, line: index + 1, text: "" };
+    current.text += text;
+    // An odd run of trailing backslashes continues the recipe onto the next line, and the
+    // shell deletes the backslash and the break, so the continuation joins the word.
+    if (/(?<!\\)(?:\\\\)*\\$/.test(text)) {
+      current.text = current.text.slice(0, -1);
+      continue;
+    }
+    units.push(current);
+    current = undefined;
+  }
+  if (current !== undefined) units.push(current);
+  return units;
+}
+
+/**
+ * The npm installs `files` hold, and the ones that do not skip lifecycle scripts.
+ *
+ * A workflow is YAML and a package manifest is JSON, so both are read with the parser
+ * that owns their grammar; a Makefile recipe is shell text with backslash continuations.
+ * Every script is then tokenised with the shell parser, and each install is judged on
+ * the options of its own command: a flag to the left of `;`/`&&`/`|` does not make the
+ * install to the right safe.
+ */
+function npmInstalls(files) {
+  const installs = [];
+  const offenders = [];
+  for (const [file, content] of files) {
+    const scripts = /(?:^|\/)package\.json$/.test(file)
+      ? packageScripts(file, content)
+      : /\.ya?ml$/.test(file)
+        ? workflowScripts(file, content)
+        : makefileScripts(file, content);
+    for (const { line, text } of scripts) {
+      const commands = shellCommands(text);
+      const installing = commands.filter(runsNpmInstall);
+      // A word the shell expands — `NPM=npm; $NPM ci` — hides the install from every
+      // command of its own, so the script's words are read together as well: a script
+      // that names npm and an installing subcommand is a site, and with no command of
+      // its own to judge it is an unsafe one.
+      if (installing.length === 0 && !runsNpmInstall(commands.flat())) continue;
+      const site = line === undefined ? file : `${file}:${line}`;
+      installs.push(site);
+      const safe =
+        installing.length > 0 &&
+        installing.every((words) => lastIgnoreScriptsOption(words) === "--ignore-scripts");
+      if (!safe) offenders.push(`${site}: ${text.trim()}`);
+    }
+  }
+  return { installs, offenders };
 }
 
 /** One key of the workspace manifest's `[workspace.package]` table. */
@@ -143,23 +318,12 @@ function toolchainPinning(channel) {
   return `[toolchain]\n${declared}components = ["clippy", "rustfmt"]\nprofile = "minimal"\n`;
 }
 
-/** The `jobs:` table of a workflow, each job mapped to the lines of its block. */
+/** The `jobs` table of a workflow, parsed, keyed by job id. */
 function jobsIn(text) {
-  const lines = text.split("\n");
-  const start = lines.indexOf("jobs:");
-  assert.notEqual(start, -1, "the workflow declares its jobs at the top level");
-  const jobs = new Map();
-  let current = null;
-  for (const line of lines.slice(start + 1)) {
-    const declared = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
-    if (declared) {
-      current = declared[1];
-      jobs.set(current, []);
-      continue;
-    }
-    if (current !== null) jobs.get(current).push(line);
-  }
-  return jobs;
+  const workflow = parseYaml(text);
+  assert.equal(typeof workflow, "object", "the workflow is a YAML document");
+  assert.equal(typeof workflow.jobs, "object", "the workflow declares its jobs at the top level");
+  return new Map(Object.entries(workflow.jobs));
 }
 
 test("the committed tree passes check-version", () => {
@@ -283,26 +447,285 @@ test("every npm install in the repository skips dependency lifecycle scripts", (
   // recipe, not a call in the workflow. A new install site — or a flag dropped from the
   // existing one — would run a dependency's install script in the privileged job with
   // nothing failing, so the invariant is checked across the whole repository rather than
-  // on any single call site.
-  const installs = [];
-  const offenders = [];
-  for (const file of ["Makefile", ...workflowFiles()]) {
-    for (const [index, line] of read(file).split("\n").entries()) {
-      const command = line.trim();
-      if (command.startsWith("#")) continue;
-      if (!/\bnpm\b/.test(command) || !/\b(ci|install|i)\b/.test(command)) continue;
-      installs.push(`${file}:${index + 1}`);
-      if (!/--ignore-scripts\b/.test(command)) offenders.push(`${file}:${index + 1}: ${command}`);
-    }
-  }
+  // on any single call site. The runtime harnesses are read for the same reason and not
+  // because they run there: they never do, which is the point of the isolation the next
+  // case pins.
+  const harness = harnessFiles();
+  const { installs, offenders } = npmInstalls([
+    ["Makefile", read("Makefile")],
+    ...workflowFiles().map((file) => [file, read(file)]),
+    ...harness.map((file) => [file, read(file)]),
+  ]);
 
   assert.notDeepEqual(installs, [], "no npm install was found, so this test proves nothing");
+  assert.notDeepEqual(harness, [], `no harness file was read from ${INTEGRATION}`);
   assert.deepEqual(
     offenders,
     [],
     "these npm installs run dependency lifecycle scripts; in publish-npm that is " +
       "arbitrary code in the job holding id-token: write",
   );
+});
+
+test("the runtime harnesses stay private, locked and outside the published package", () => {
+  // A harness installs a pinned tree of its own — Wrangler and the `workerd` binary — so it
+  // must never travel in the tarball, and it must never be publishable itself. Neither is
+  // enforced by anything npm does: `files` decides what the package ships, and `private`
+  // is the only thing that stops an accidental `npm publish` of the harness. The directory
+  // is a sibling of the package rather than a child of it, which is the arrangement this
+  // pins: a harness moved inside `crates/opportune-wasm/js` would be packed whatever
+  // `files` says.
+  assert.ok(existsSync(join(ROOT, INTEGRATION)), `${INTEGRATION} holds no runtime harness`);
+  const harnesses = readdirSync(join(ROOT, INTEGRATION), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${INTEGRATION}/${entry.name}`)
+    .sort();
+  assert.notDeepEqual(harnesses, [], `no harness lives under ${INTEGRATION}`);
+
+  const pkg = join(ROOT, JS_PACKAGE);
+  for (const dir of harnesses) {
+    const manifest = JSON.parse(read(`${dir}/package.json`));
+    assert.equal(manifest.private, true, `${dir} is not a private package, so npm could publish it`);
+    assert.ok(
+      existsSync(join(ROOT, dir, "package-lock.json")),
+      `${dir} commits no lockfile, so \`npm ci --ignore-scripts\` has nothing to install from`,
+    );
+    assert.deepEqual(
+      Object.keys(manifest.dependencies ?? {}),
+      [],
+      `${dir} declares a runtime dependency, and a harness exists to test the package's own`,
+    );
+    assert.ok(
+      !resolve(ROOT, dir).startsWith(`${pkg}${sep}`),
+      `${dir} sits inside the npm package's directory, where npm packs it whatever \`files\` says`,
+    );
+  }
+  assert.deepEqual(
+    JSON.parse(read(MANIFEST)).files.filter((entry) => entry.includes("integration")),
+    [],
+    "the npm package's `files` list names a runtime harness",
+  );
+});
+
+test("the runtime-integration CI jobs are unprivileged, bounded and fed by the packed tarball", () => {
+  // Each runtime a bundle-only loader serves has a job that installs a pinned tree and
+  // executes it, so each may hold nothing but `contents: read` and must be bounded; the
+  // flag on its installs is the general gate's business, and the isolation is this
+  // one's. Each consumes the tarball `test-wasm` uploaded rather than rebuilding the
+  // package, so what it runs is the artefact a consumer installs. The workflow is parsed
+  // as YAML, so a permission, timeout or step cannot be hidden from the check by
+  // indentation or a comment.
+  const RUNTIME_JOBS = [
+    { job: "test-wasm-workerd", target: /make test-wasm-workerd WORKERD_TARBALL=/ },
+    { job: "test-wasm-web", target: /make test-wasm-web WEB_TARBALL=/ },
+  ];
+  const jobs = jobsIn(read(".github/workflows/ci.yml"));
+  for (const { job: name, target } of RUNTIME_JOBS) {
+    const job = jobs.get(name);
+    assert.ok(job !== undefined, `ci.yml declares no ${name} job`);
+    assert.deepEqual(
+      job.permissions,
+      { contents: "read" },
+      `${name} must hold \`contents: read\` and no other permission`,
+    );
+    assert.equal(typeof job["timeout-minutes"], "number", `${name} has no explicit timeout`);
+    assert.equal(job.needs, "test-wasm", `${name} does not wait for the build`);
+    const steps = job.steps ?? [];
+    assert.ok(
+      steps.some((step) => /^actions\/download-artifact@[0-9a-f]{40}$/.test(step.uses ?? "")),
+      `${name} downloads no pinned artefact`,
+    );
+    assert.ok(
+      steps.some((step) => step.with?.name === "npm-package-tarball"),
+      `${name} consumes no tarball artefact`,
+    );
+    assert.ok(
+      steps.some((step) => target.test(step.run ?? "")),
+      `${name} builds the package instead of running the artefact it downloaded`,
+    );
+  }
+
+  const producer = jobs.get("test-wasm");
+  assert.ok(producer !== undefined, "ci.yml declares no test-wasm job");
+  const producerSteps = producer.steps ?? [];
+  assert.ok(
+    producerSteps.some((step) => /^actions\/upload-artifact@[0-9a-f]{40}$/.test(step.uses ?? "")),
+    "test-wasm uploads no pinned artefact",
+  );
+  assert.ok(
+    producerSteps.some((step) => step.with?.name === "npm-package-tarball"),
+    "test-wasm uploads the tarball the runtime-integration jobs wait for",
+  );
+
+  // The other half of the isolation: no job that holds `id-token: write` may reach a
+  // harness at all. `publish-npm` is the one that matters, and the only way in is a
+  // Makefile target — which is a name in a workflow step.
+  for (const file of workflowFiles()) {
+    for (const [jobName, job] of jobsIn(read(file))) {
+      if (job.permissions?.["id-token"] !== "write") continue;
+      const commands = (job.steps ?? []).map((step) => step.run ?? "").join("\n");
+      assert.ok(
+        !commands.includes(INTEGRATION),
+        `${file} ${jobName} holds \`id-token: write\` and reaches a runtime harness`,
+      );
+      for (const { job: name } of RUNTIME_JOBS) {
+        assert.ok(
+          !commands.includes(name),
+          `${file} ${jobName} holds \`id-token: write\` and reaches ${name}`,
+        );
+      }
+    }
+  }
+});
+
+test("the npm-install gate reads package scripts, not manifest prose", () => {
+  const manifest = JSON.stringify({
+    description: "npm install in prose is not a command",
+    scripts: { postinstall: "npm install left-pad" },
+  });
+  const { installs, offenders } = npmInstalls([["harness/package.json", manifest]]);
+  assert.equal(installs.length, 1, "the script's install is a site");
+  assert.equal(offenders.length, 1, "the script's install has no --ignore-scripts");
+});
+
+test("a backslash continuation is read as the one command the shell receives", () => {
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: |",
+    "          npm ci \\",
+    "            --ignore-scripts",
+    "          npm install left-pad",
+    "",
+  ].join("\n");
+  const { installs, offenders } = npmInstalls([["ci.yml", content]]);
+  assert.equal(installs.length, 1);
+  assert.equal(offenders.length, 1, "the second install has no --ignore-scripts");
+  assert.match(offenders[0], /npm install left-pad/);
+});
+
+test("a YAML folded scalar is read as the command the shell receives", () => {
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: >",
+    "          npm",
+    "          ci",
+    "",
+  ].join("\n");
+  const { installs, offenders } = npmInstalls([["ci.yaml", content]]);
+  assert.equal(installs.length, 1);
+  assert.equal(offenders.length, 1, "npm ci without --ignore-scripts is unsafe");
+});
+
+test("a flag on one command does not make the next install safe", () => {
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: npm ci --ignore-scripts && npm install left-pad",
+    "",
+  ].join("\n");
+  const { offenders } = npmInstalls([["ci.yml", content]]);
+  assert.equal(offenders.length, 1, "the install to the right of && has no flag");
+});
+
+test("quoted text cannot hide an install, and .yaml files are read too", () => {
+  const content = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: 'echo \"not # a comment\"; npm ci'",
+    "",
+  ].join("\n");
+  const { installs, offenders } = npmInstalls([["ci.yaml", content]]);
+  assert.equal(installs.length, 1);
+  assert.equal(offenders.length, 1);
+});
+
+test("documented source installs and manual publish skip lifecycle scripts", () => {
+  // The TypeScript snippet gate does not execute shell fences or the maintainer
+  // runbook, so removing one of these flags would otherwise leave every gate green.
+  const building = read("docs/wasm.md").split("### Building from source")[1]?.split("\n### ")[0];
+  assert.ok(building, "docs/wasm.md keeps its source-build section");
+  const { installs, offenders } = npmInstalls([["docs/wasm.md", building]]);
+  assert.equal(installs.length, 2, "both the tooling install and local tarball install are read");
+  assert.deepEqual(offenders, []);
+
+  const publish = /npm publish crates\/opportune-wasm\/js[^\n`]*/.exec(read("CONTRIBUTING.md"))?.[0];
+  assert.ok(publish, "CONTRIBUTING.md keeps its manual npm publish command");
+  assert.match(publish, /(?:^|\s)--ignore-scripts(?:\s|$)/);
+});
+
+test("building the package removes stale artifacts a previous build left in dist/", () => {
+  // `tsc` only writes and `bundle-module` only copies, so a file left in `dist/`
+  // by an older build — a renamed module's glue, a removed stub — survives into
+  // the packed tarball with nothing failing. The build cleans the tree first, so
+  // the sentinel a build cannot regenerate is gone when it returns.
+  const root = mkdtempSync(join(tmpdir(), "opportune-clean-build-"));
+  try {
+    cpSync(join(JS_PACKAGE, "src"), join(root, "src"), { recursive: true });
+    cpSync(join(JS_PACKAGE, "bin"), join(root, "bin"), { recursive: true });
+    cpSync(join(JS_PACKAGE, "pkg"), join(root, "pkg"), { recursive: true });
+    cpSync(join(JS_PACKAGE, "pkg-node"), join(root, "pkg-node"), { recursive: true });
+    for (const file of ["package.json", "tsconfig.json", "tsconfig.build.json"]) {
+      copyFileSync(join(JS_PACKAGE, file), join(root, file));
+    }
+    symlinkSync(join(JS_PACKAGE, "node_modules"), join(root, "node_modules"), "dir");
+    const sentinel = join(root, "dist", "stale-glue.cjs");
+    mkdirSync(dirname(sentinel), { recursive: true });
+    writeFileSync(sentinel, "module.exports = 'stale';\n");
+
+    const run = spawnSync("npm", ["run", "build"], { cwd: root, encoding: "utf8" });
+    assert.equal(run.status, 0, `the build failed: ${run.stderr}`);
+    assert.equal(
+      existsSync(sentinel),
+      false,
+      "a file the build does not generate survived into dist/",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the bundle refuses to publish different web and Node Wasm modules", () => {
+  // The two targets are built independently, so equal bytes are an assumption the
+  // bundle must enforce rather than a property the packlist can infer. Damage only a
+  // sandbox's Node copy: the real build outputs and the checkout stay untouched.
+  const root = mkdtempSync(join(tmpdir(), "opportune-target-drift-"));
+  try {
+    cpSync(join(JS_PACKAGE, "bin"), join(root, "bin"), { recursive: true });
+    cpSync(join(JS_PACKAGE, "pkg"), join(root, "pkg"), { recursive: true });
+    cpSync(join(JS_PACKAGE, "pkg-node"), join(root, "pkg-node"), { recursive: true });
+    const source = join(root, "pkg", "opportune_wasm_bg.wasm");
+    const drifted = join(root, "pkg-node", "opportune_wasm_bg.wasm");
+    const original = readFileSync(drifted);
+    // An empty custom section is a valid Wasm module with different bytes, rather
+    // than a corrupt file that another validation layer would reject first.
+    writeFileSync(drifted, Buffer.concat([original, Buffer.from([0, 1, 0])]));
+
+    const failed = spawnSync(process.execPath, ["bin/bundle-module.mjs"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.notEqual(failed.status, 0, `different target modules were accepted:\n${failed.stdout}`);
+    assert.match(
+      failed.stderr,
+      /different modules for the `web` and `nodejs` targets/,
+      "the failure names the target drift and its repair",
+    );
+
+    writeFileSync(drifted, original);
+    const repaired = spawnSync(process.execPath, ["bin/bundle-module.mjs"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(repaired.status, 0, `the restored targets did not bundle:\n${repaired.stderr}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the lockfile's root entry declares the floors the manifest does", () => {
@@ -322,12 +745,10 @@ test("the lockfile's root entry declares the floors the manifest does", () => {
 
 test("CI executes the runtime floors the npm package declares", () => {
   // `engines` is a promise, and the packed-package suite is what proves one: it packs the
-  // tarball, installs it into a temporary consumer project, imports every declared
-  // subpath, `require`s the CommonJS entry and compiles the declarations for a consumer
-  // whose only lib is `ES2024`. A lane on the declared floor deleted in a review leaves
-  // every gate green — the suite still runs on the newest LTS — so the lane is pinned to
-  // the manifest's own numbers rather than to copies of them: a floor moved without its
-  // lane fails here instead of shipping as a promise nothing executes.
+  // tarball, installs it into a temporary consumer project and checks it with the standard
+  // packaging tools. A lane on the declared floor deleted in a review leaves every gate
+  // green — the suite still runs on the newest LTS — so the lane is pinned to the
+  // manifest's own numbers rather than to copies of them.
   const engines = JSON.parse(read(MANIFEST)).engines;
   const floor = (range, runtime) => {
     const lowest = /^>=(\d+(?:\.\d+)*)$/.exec(range ?? "")?.[1];
@@ -338,27 +759,29 @@ test("CI executes the runtime floors the npm package declares", () => {
     return lowest;
   };
   const lane = workflowFiles()
-    .flatMap((file) => [...jobsIn(read(file))].map(([job, lines]) => [`${file} ${job}`, lines.join("\n")]))
+    .flatMap((file) => [...jobsIn(read(file))].map(([job, body]) => [`${file} ${job}`, body]))
     .find(([, body]) =>
-      body.includes("node --test crates/opportune-wasm/js/tests/packed-package.test.mjs"),
+      (body.steps ?? []).some((step) =>
+        (step.run ?? "").includes("node --test crates/opportune-wasm/js/tests/packed-package.test.mjs"),
+      ),
     );
   assert.ok(
     lane !== undefined,
     "no CI job runs the packed-package suite, so nothing proves what the package installs onto",
   );
   const [where, body] = lane;
+  const steps = body.steps ?? [];
   assert.ok(
-    body.includes(`node-version: "${floor(engines.node, 'node')}"`),
+    steps.some((step) => step.with?.["node-version"] === floor(engines.node, "node")),
     `${where}: the packed-package suite runs on no lane naming \`engines.node\` (${engines.node}), ` +
       "so the floor a consumer reads is not one CI executes",
   );
   assert.ok(
-    body.includes(`bun-version: "${floor(engines.bun, 'bun')}"`),
+    steps.some((step) => step.with?.["bun-version"] === floor(engines.bun, "bun")),
     `${where}: the packed-package job installs no Bun naming \`engines.bun\` (${engines.bun})`,
   );
-  assert.match(
-    body,
-    /bun test crates\/opportune-wasm\/js\/tests\//,
+  assert.ok(
+    steps.some((step) => /bun test crates\/opportune-wasm\/js\/tests\//.test(step.run ?? "")),
     `${where}: the job runs the suite on Node and not under Bun, so the second declared runtime is unexecuted`,
   );
 });
@@ -395,19 +818,16 @@ test("every job that compiles the extension exports the pinned toolchain", () =>
   // back to whatever compiler the runner image ships, and the job stays green while
   // building with a toolchain nobody declared. The export has to reach the *following*
   // steps, so it goes through GITHUB_ENV; a `run: export` inside one step reaches nothing.
-  // The shapes looked for are the two uv commands that compile the extension today
-  // (`uv build`, and an installing `uv sync`); a job that starts compiling it another way
-  // would need this rule widened, which is the one way this test could go quietly stale.
-  // Comments discuss `uv build` and the pin constantly, so only command lines count.
-  const isCommand = (line) => !/^\s*#/.test(line);
   const problems = [];
   for (const file of workflowFiles()) {
-    for (const [job, lines] of jobsIn(read(file))) {
-      const firstUv = lines.findIndex(
-        (line) => isCommand(line) && /\buv (build|sync)\b/.test(line) && !/--no-install-project/.test(line),
+    for (const [job, body] of jobsIn(read(file))) {
+      const steps = body.steps ?? [];
+      const run = (step) => step.run ?? "";
+      const firstUv = steps.findIndex(
+        (step) => /\buv (build|sync)\b/.test(run(step)) && !/--no-install-project/.test(run(step)),
       );
       if (firstUv === -1) continue;
-      const pin = lines.findIndex((line) => isCommand(line) && /RUSTUP_TOOLCHAIN=/.test(line));
+      const pin = steps.findIndex((step) => /RUSTUP_TOOLCHAIN=/.test(run(step)));
       if (pin === -1) {
         problems.push(`${file} ${job}: compiles the extension with no RUSTUP_TOOLCHAIN export`);
         continue;
@@ -415,20 +835,20 @@ test("every job that compiles the extension exports the pinned toolchain", () =>
       if (pin > firstUv) {
         problems.push(`${file} ${job}: exports RUSTUP_TOOLCHAIN after the first uv command`);
       }
-      if (!lines.slice(pin, firstUv).some((line) => line.includes("GITHUB_ENV"))) {
+      const between = steps.slice(pin, firstUv).map(run).join("\n");
+      if (!between.includes("GITHUB_ENV")) {
         problems.push(`${file} ${job}: exports RUSTUP_TOOLCHAIN outside GITHUB_ENV, so later steps do not see it`);
       }
       // The export is fail-closed only while an unparseable pin reddens the job: an empty
       // RUSTUP_TOOLCHAIN is no override at all, so rustup falls back to the runner image's
       // default compiler and the job goes green having compiled with a toolchain nobody
-      // declared — the drift this step exists to close. `check-version` also rejects a
-      // malformed pin, but in the lint job, and these jobs do not wait for lint.
-      const guard = lines.findIndex(
-        (line) => isCommand(line) && /\[\s*-z\s*"\$\{?channel\}?"\s*\]/.test(line),
-      );
+      // declared.
+      const guard = steps.findIndex((step) => /\[\s*-z\s*"\$\{?channel\}?"\s*\]/.test(run(step)));
       if (guard === -1 || guard > pin) {
         problems.push(`${file} ${job}: exports the pin without refusing an empty channel first`);
-      } else if (!lines.slice(guard, pin).some((line) => isCommand(line) && /exit 1/.test(line))) {
+      } else if (!/exit 1/.test(run(steps[guard]))) {
+        // The guard and the export share a `run:` block, so the refusal is a line in that
+        // block rather than a later step.
         problems.push(`${file} ${job}: the empty-channel guard does not fail the job`);
       }
     }
@@ -437,63 +857,59 @@ test("every job that compiles the extension exports the pinned toolchain", () =>
 });
 
 test("lint and the release tag both run the one check-version target", () => {
-  // The release tag's job used to repeat three of the comparisons inline. It now delegates
-  // so that the manifest and toolchain checks added here are enforced at the tag too; a
-  // job that grew its own copy again, or a lint target that stopped depending on the
-  // shared one, would each leave half the gate unrun with everything green. The two
-  // comparisons that stay inline are pinned beside it: without the ref-type guard a
-  // branch dispatch compares a branch name against a version, and without the tag test
-  // a `v0.2.0` tag on an 0.1.0 tree publishes four artefacts under a version nothing
-  // declared.
+  // The release tag's job delegates to the shared target so that the manifest and
+  // toolchain checks are enforced at the tag too; a job that grew its own copy again, or
+  // a lint target that stopped depending on the shared one, would leave half the gate
+  // unrun with everything green.
   const lint = /^lint:([^\n]*)$/m.exec(read("Makefile"));
   assert.ok(lint, "the Makefile declares a lint target");
   assert.match(lint[1], /\bcheck-version\b/, "make lint does not run check-version");
 
   const tag = jobsIn(read(".github/workflows/publish.yml")).get("version-check");
   assert.ok(tag, "publish.yml declares a version-check job");
-  const step = tag.join("\n");
+  const commands = (tag.steps ?? []).map((step) => step.run ?? "").join("\n");
   assert.ok(
-    tag.some((line) => /^\s+make check-version$/.test(line)),
+    (tag.steps ?? []).some((step) => /^\s*make check-version$/m.test(step.run ?? "")),
     "publish.yml's version-check does not run the shared check-version target",
   );
   assert.match(
-    step,
+    commands,
     /test "v\$\{version\}" = "\$\{GITHUB_REF_NAME\}"/,
     "publish.yml's version-check no longer compares the tag with the workspace version",
   );
   assert.match(
-    step,
+    commands,
     /if \[ "\$\{GITHUB_REF_TYPE\}" != "tag" \]/,
     "publish.yml's version-check no longer refuses a non-tag dispatch",
   );
 });
 
 test("release-please reconciles the Python lockfile with the bumped version", () => {
-  // `release-please` bumps the version sources but touches no lockfile. The Cargo
-  // workspace is reconciled by `cargo metadata`; the Python project's `uv.lock` is
-  // the other generated lockfile in the bumped tree, and every `uv run --locked`
-  // on the release PR reads it. The step that regenerates it is invisible to the
-  // compiler, so deleting it would leave a green run and a release branch whose
-  // Python lane fails. The setup action has to be the same pinned revision ci.yml
-  // uses, or the release branch resolves the lock with a different uv than the PR.
+  // `release-please` bumps the version sources but touches no lockfile. The Python
+  // project's `uv.lock` is the other generated lockfile in the bumped tree, and every
+  // `uv run --locked` on the release PR reads it. The step that regenerates it is
+  // invisible to the compiler, so deleting it would leave a green run and a release
+  // branch whose Python lane fails.
   const releasePlease = jobsIn(read(".github/workflows/release-please.yml")).get("release-please");
   assert.ok(releasePlease, "release-please.yml declares the release-please job");
-  const block = releasePlease.join("\n");
+  const steps = releasePlease.steps ?? [];
+  const commands = steps.map((step) => step.run ?? "").join("\n");
+  const uses = steps.map((step) => step.uses ?? "").join("\n");
 
   const pinned = /astral-sh\/setup-uv@([0-9a-f]{40})/.exec(read(".github/workflows/ci.yml"))?.[1];
   assert.ok(pinned, "ci.yml pins astral-sh/setup-uv by commit");
   assert.match(
-    block,
+    uses,
     new RegExp(`astral-sh/setup-uv@${pinned}\\b`),
     "release-please.yml does not install the uv revision ci.yml pins",
   );
   assert.match(
-    block,
+    commands,
     /uv lock --project crates\/opportune-py/,
     "release-please.yml does not regenerate crates/opportune-py/uv.lock",
   );
   assert.match(
-    block,
+    commands,
     /git add Cargo\.lock crates\/opportune-py\/uv\.lock/,
     "release-please.yml does not commit the Python lockfile it regenerated",
   );
@@ -523,18 +939,14 @@ test("Pages deployments are serialised without cancelling one in progress", () =
   // Pages is one production environment, so two overlapping deploys race on it and a
   // cancelled in-progress deploy leaves that environment's state undefined — hence the
   // queue. The group has to belong to the deploy job rather than to the workflow, because
-  // `build` runs for every pull request as well: GitHub keeps at most one *pending* run per
-  // group ("any existing pending job or workflow in the same concurrency group will be
-  // canceled and the new queued job or workflow will take its place"), so a static
-  // workflow-level group lets a pull-request build displace a queued deploy of an
-  // already-merged commit. That deploy then never happens, it reports as cancelled rather
-  // than failed, and the site stays stale until the next docs change reaches main.
+  // `build` runs for every pull request as well.
   const text = read(".github/workflows/docs.yml");
   const header = text.slice(0, text.indexOf("\njobs:"));
-  if (/^concurrency:$/m.test(header)) {
-    const group = /^\s+group:\s*(.+)$/m.exec(header)?.[1] ?? "";
+  const workflowConcurrency = parseYaml(header).concurrency;
+  if (workflowConcurrency !== undefined) {
+    const group = typeof workflowConcurrency === "string" ? workflowConcurrency : workflowConcurrency.group;
     assert.match(
-      group,
+      String(group ?? ""),
       /github\./,
       "docs.yml's workflow-level group is one static name, so a pull-request build joins " +
         "the deploy group and can displace a queued deploy",
@@ -543,16 +955,11 @@ test("Pages deployments are serialised without cancelling one in progress", () =
 
   const deploy = jobsIn(text).get("deploy");
   assert.ok(deploy, "docs.yml declares a deploy job");
-  const block = deploy.join("\n");
-  assert.match(
-    block,
-    /^\s+concurrency:$/m,
-    "docs.yml's deploy job declares no concurrency group, so two deploys can race on the Pages environment",
-  );
-  assert.match(block, /^\s+group: \S+$/m, "docs.yml's deploy job has no concurrency group name");
-  assert.match(
-    block,
-    /^\s+cancel-in-progress: false$/m,
+  assert.equal(typeof deploy.concurrency, "object", "docs.yml's deploy job declares no concurrency group");
+  assert.match(String(deploy.concurrency.group ?? ""), /\S/, "docs.yml's deploy job has no group name");
+  assert.equal(
+    deploy.concurrency["cancel-in-progress"],
+    false,
     "docs.yml cancels an in-progress deploy, leaving the Pages environment's state undefined",
   );
 });

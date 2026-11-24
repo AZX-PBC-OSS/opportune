@@ -44,9 +44,10 @@ import {
 } from "../dist/index.js";
 import { calendarViewToBlocks } from "../dist/adapters/graph.js";
 
-/** The built tree the loader resolves from, and the module it reads beside it. */
-const DIST = join(import.meta.dirname, "..", "dist");
-const MODULE = join("pkg", "opportune_wasm.cjs");
+/** The package root this suite belongs to, the built tree, and the glue the loader resolves. */
+const PACKAGE = join(import.meta.dirname, "..");
+const DIST = join(PACKAGE, "dist");
+const GLUE = join("pkg", "opportune_wasm.cjs");
 const WASM = join("pkg", "opportune_wasm_bg.wasm");
 
 /** The `meta` every engine answer carries, and the projection now demands. */
@@ -93,12 +94,14 @@ function thrown(call) {
  *
  * The copy's own modules are what the cases import, so its loader resolves beside
  * the copy rather than the checked-in tree — which is the only way to reach the
- * failures a deployment sees.
+ * failures a deployment sees. The manifest travels with it because the loader is
+ * selected by `package.json#imports`, which a bare `dist/` copy has no `#wasm` for.
  */
 async function damaged(damage, check) {
   const dir = mkdtempSync(join(tmpdir(), "opportune-adoption-"));
   try {
     cpSync(DIST, join(dir, "dist"), { recursive: true });
+    cpSync(join(PACKAGE, "package.json"), join(dir, "package.json"));
     damage(join(dir, "dist"));
     return await check((name) => import(pathToFileURL(join(dir, "dist", name)).href));
   } finally {
@@ -415,7 +418,7 @@ test("a module the bundler did not copy says how to keep the package external", 
   // rebuilding both succeed and change nothing. That is the failure a serverless
   // deployment meets first, and the one the reinstall advice cannot fix.
   await damaged(
-    (dir) => rmSync(join(dir, MODULE)),
+    (dir) => rmSync(join(dir, GLUE)),
     async (load) => {
       const pkg = await load("index.js");
       const error = thrown(() => new pkg.Engine());

@@ -25,7 +25,8 @@
  *   document: `wasm_unavailable` when the compiled module is missing or stale,
  *   `wasm_error` when a call into it throws something that is not its documented
  *   payload, `engine_disposed` when a freed engine is used again, and
- *   `unsupported_runtime` when a browser or Edge bundle resolved this package.
+ *   `unsupported_runtime`, kept for bundles built against an earlier release whose
+ *   browser entry refused the runtime; no loader in this package raises it now.
  *
  * {@link OpportuneError.code} is an open union of those codes and the engine's own
  * diagnostic codes, so a handler can name one without a cast and a code from a later

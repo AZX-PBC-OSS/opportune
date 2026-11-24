@@ -1,32 +1,22 @@
 /**
- * The bridge to the `wasm-pack` Node build in `pkg/`.
+ * What the package's engine code needs from the compiled module.
  *
- * The module wasm-pack writes is CommonJS and its declarations live beside it, so
- * the package loads it with `createRequire` instead of a static `import`: a static
- * import of the compiled module would pull a file outside the compiler's `rootDir`
- * into the program, and there would be nothing for it to type against but
- * wasm-bindgen's generated `.d.ts`. `npm run build` copies the module into
- * `dist/pkg/` under a `.cjs` name (see `bin/bundle-module.mjs`), so what this file
- * loads is part of the published tree. What is declared here is the subset of
- * exports this package calls, and it is checked by name at load time, so a `pkg/`
- * built from an older Rust surface stops the caller with the export it is missing
- * rather than with "`undefined` is not a function" several frames deep.
+ * `wasm-pack` builds this crate for two targets from one artefact: the `nodejs` target
+ * emits a CommonJS glue that reads the module beside itself and instantiates it as it
+ * loads, and the `web` target an ES module a runtime initialises explicitly. `npm run
+ * build` copies both glues and the one `.wasm` into `dist/pkg/`, and
+ * `package.json#imports` selects the loader through `#wasm`. This module holds what
+ * everything above that seam shares: the shape of the exports the engine code calls, the
+ * repair guidance a load failure carries, and the translation of everything a call can
+ * throw into one error.
  *
- * Everything a call can throw is translated here, once: a rejection the module
- * documented arrives as its structured payload and is rebuilt as an
- * {@link OpportuneError} carrying the same four fields, so an application answers
- * its own caller with the pointer into the document it sent.
- *
- * The module is loaded on first use, not when this package is imported: importing
- * `opportune` to reach a preset builder, a sugar helper or a generated type must
- * not pay for instantiating a WebAssembly module — and must not fail because one
- * was never built. A caller that never touches the engine never loads it; the
- * first call that does loads it once and keeps it.
+ * Nothing here names a runtime or a loader: no `node:` import, no `fetch`, no `.wasm`
+ * path, no initialiser. That is what lets each runtime's generated glue differ behind
+ * `#wasm` while one copy of the contract and the translation sits below every
+ * engine-backed entry point, including the adapters.
  */
 
-import { createRequire } from "node:module";
-
-import { OpportuneError, reason, rejection } from "./errors.js";
+import { OpportuneError, reason } from "./errors.js";
 import { asRecord } from "./json.js";
 import type { Diagnostic } from "./generated/types.js";
 
@@ -56,7 +46,15 @@ export interface WasmEngine {
   free(): void;
 }
 
-/** The exports this package calls, as the crate exports them. */
+/**
+ * The exports this package calls, as both `wasm-pack` targets export them.
+ *
+ * The target decides how the module is loaded, not what it exports: the engine class and
+ * the free functions are the same in the `nodejs` glue and the `web` one, which
+ * additionally exports the initialisers a runtime that loads explicitly calls. Those
+ * belong to the loaders that call them, so they are not part of what the engine code
+ * above `#wasm` depends on.
+ */
 export interface WasmModule {
   readonly WasmEngine: new (limitsJson?: string | null) => WasmEngine;
   readonly version: () => string;
@@ -72,11 +70,6 @@ export interface WasmModule {
   readonly graph_extended_property_expand: () => string;
 }
 
-const require = createRequire(import.meta.url);
-
-/** Where the build puts the compiled module, seen from this file in `dist/`. */
-const MODULE_PATH = "./pkg/opportune_wasm.cjs";
-
 /**
  * What a caller does about a module that did not load.
  *
@@ -85,159 +78,9 @@ const MODULE_PATH = "./pkg/opportune_wasm.cjs";
  * checkout rebuilds the artefact there. The monorepo's own `wasm-pack` invocation
  * names neither of those places, so it is not what this failure says.
  */
-const REPAIR =
+export const REPAIR =
   "Reinstall the package (`npm install opportune`) to restore it, or rebuild a source " +
   "checkout from its root with `make wasm`.";
-
-/**
- * What a caller does when the module could not be *resolved*, rather than loaded.
- *
- * A bundler that inlines this package into one output file moves `dist/index.js`
- * away from the `dist/pkg/` pair beside it, so `require` resolves next to the bundle
- * and finds nothing: the file is present in `node_modules` and absent from the
- * build's own tree. Reinstalling and rebuilding both succeed and change nothing, so
- * this is the one case where the advice above is the wrong advice — and it is the
- * case a deployment meets first, since a serverless function is a bundle.
- */
-const BUNDLED =
-  "If a bundler produced this build, keep `opportune` external so its `dist/pkg/` " +
-  "directory travels beside the module: `serverExternalPackages: [\"opportune\"]` in " +
-  "`next.config.*`, or `external: [\"opportune\"]` in esbuild, Vite and Bun.";
-
-/**
- * The repair guidance for a load failure, with the bundler note when `cause` is a
- * resolution failure.
- *
- * `require` reports a module that is not beside the loader in the runtime's own
- * words: Node sets `code: "MODULE_NOT_FOUND"`, Bun and the bundlers word it as
- * `Cannot find module`/`Cannot find package` without one. Both are read, so the
- * hint reaches the consumer whichever runtime bundled them.
- */
-function repair(cause?: unknown): string {
-  return resolutionFailure(cause) ? `${REPAIR} ${BUNDLED}` : REPAIR;
-}
-
-/** Whether `cause` is the runtime saying it could not resolve the module at all. */
-function resolutionFailure(cause: unknown): boolean {
-  const code =
-    typeof cause === "object" && cause !== null
-      ? (cause as { code?: unknown }).code
-      : undefined;
-  if (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") {
-    return true;
-  }
-  return /\bCannot find (?:module|package)\b/.test(reason(cause));
-}
-
-/** The free functions the package calls, checked by name when the module loads. */
-const FUNCTIONS: readonly Exclude<keyof WasmModule, "WasmEngine">[] = [
-  "version",
-  "default_limits_json",
-  "upgrade_rule_json",
-  "upgrade_calendar_json",
-  "upgrade_goal_json",
-  "marker_tags",
-  "marker_event_key",
-  "graph_extended_property_namespace_guid",
-  "graph_extended_property_tags_id",
-  "graph_extended_property_event_key_id",
-  "graph_extended_property_expand",
-] as const;
-
-/** The engine's own entry points, checked by name when the module loads. */
-const METHODS: readonly (keyof WasmEngine)[] = [
-  "tzdb_version",
-  "find_availability_json",
-  "check_slot_json",
-  "validate_json",
-  "required_ranges_json",
-  "graph_calendar_view_to_blocks_json",
-  "graph_get_schedule_to_blocks_json",
-  "graph_working_hours_to_rule_json",
-  "google_events_list_to_blocks_json",
-  "google_free_busy_to_blocks_json",
-  "free",
-] as const;
-
-/**
- * The compiled module, loaded once on first use.
- *
- * Loading is lazy and single: the module instance and its memory are the
- * resource every engine answers from, and there is one of each per process.
- *
- * @throws OpportuneError with code `wasm_unavailable` when the package was not
- *   built or its module cannot be loaded, or was built from a Rust surface that
- *   does not export what this package calls — the message names what the load
- *   reported or the missing export, and what a caller does about it.
- */
-function load(): WasmModule {
-  let loaded: unknown;
-  try {
-    loaded = require(MODULE_PATH);
-  } catch (cause) {
-    // `require` fails both for a file that is absent and for one that is present
-    // but cannot be instantiated — a build interrupted while writing the `.wasm`
-    // beside the loader — so the message reports what the load said rather than
-    // claiming the module is missing: the second case sends whoever is paged
-    // looking for a file that is already there. Only its first line, because a
-    // Node module error carries a require stack below it and the whole failure is
-    // kept as the cause.
-    throw rejection(
-      "wasm_unavailable",
-      `the opportune WASM module at ${MODULE_PATH} beside this package did not load: ` +
-        `${reason(cause).replace(/\n.*/s, "")}. ${repair(cause)}`,
-      cause,
-    );
-  }
-  const members = asRecord(loaded);
-  if (members === undefined) {
-    throw rejection(
-      "wasm_unavailable",
-      `the opportune WASM module at ${MODULE_PATH} did not load as a module object. ${REPAIR}`,
-    );
-  }
-  const missing = ["WasmEngine", ...FUNCTIONS].filter(
-    (name) => typeof members[name] !== "function",
-  );
-  if (missing.length > 0) {
-    throw rejection(
-      "wasm_unavailable",
-      `the opportune WASM module at ${MODULE_PATH} does not export ${missing.join(", ")}: ` +
-        `it was built from an older surface. ${REPAIR}`,
-    );
-  }
-  const engineClass = members["WasmEngine"];
-  const prototype = typeof engineClass === "function" ? asRecord(Reflect.get(engineClass, "prototype")) : undefined;
-  const absent = METHODS.filter((name) => typeof prototype?.[name] !== "function");
-  if (absent.length > 0) {
-    throw rejection(
-      "wasm_unavailable",
-      `the opportune WASM module at ${MODULE_PATH} has no engine method ${absent.join(", ")}: ` +
-        `it was built from an older surface. ${REPAIR}`,
-    );
-  }
-  // Every export this package calls is present and callable, which is what the
-  // declared signatures describe: the module is compiled from this repository's own
-  // Rust crate, so its types cannot drift from it without the build changing.
-  return loaded as WasmModule;
-}
-
-/** The compiled module, loading it on the first call. */
-let loaded: WasmModule | undefined;
-
-/**
- * The compiled module, loading it if this is the first call.
- *
- * Every WASM-backed entry point reaches the module through here, so a package
- * that is imported but never used loads nothing, and one whose module cannot be
- * loaded fails on the call that needs it rather than on `import`.
- *
- * @throws OpportuneError with code `wasm_unavailable`; see {@link load}.
- */
-export function wasmModule(): WasmModule {
-  loaded ??= load();
-  return loaded;
-}
 
 /**
  * Runs one call into the module, raising whatever it throws as an

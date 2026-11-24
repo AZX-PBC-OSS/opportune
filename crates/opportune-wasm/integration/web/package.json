@@ -1,0 +1,19 @@
+{
+  "name": "opportune-web-integration",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runs the packed opportune tarball in real browsers and a Web Worker via Vitest Browser Mode and Playwright.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@vitest/browser-playwright": "5.1.1",
+    "playwright": "1.65.1",
+    "vite": "8.3.8",
+    "vitest": "5.1.1"
+  }
+}

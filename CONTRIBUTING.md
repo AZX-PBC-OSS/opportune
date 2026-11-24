@@ -98,7 +98,7 @@ Re-running the workflow skips registries that already hold the tagged version, s
 All three registries publish via OIDC Trusted Publishing with no stored API tokens. Before the very first `0.1.0` publish:
 
 - **PyPI:** Configure a pending trusted publisher for `opportune` with workflow `publish.yml` and environment `pypi`.
-- **npm:** npm requires the package to exist before adding a trusted publisher. Publish `0.1.0` manually after `make test-wasm` (`npm publish crates/opportune-wasm/js --access public`), then add a trusted publisher for `opportune` with workflow `publish.yml`, environment `npm`, and **Allow npm publish** checked (`repository.url` must match this repo for `--provenance`).
+- **npm:** npm requires the package to exist before adding a trusted publisher. Publish `0.1.0` manually after `make test-wasm` (`npm publish crates/opportune-wasm/js --ignore-scripts --access public`), then add a trusted publisher for `opportune` with workflow `publish.yml`, environment `npm`, and **Allow npm publish** checked (`repository.url` must match this repo for `--provenance`).
 - **crates.io:** Publish `0.1.0` manually in dependency order (`cargo publish -p opportune`, then `-p opportune-json`, then `-p opportune-adapters`), waiting for each crate to become visible before the next, then configure a trusted publisher on **each** of the three crates with workflow `publish.yml` and environment `crates-io`.
 - **Tag trigger:** Tags created with the default `GITHUB_TOKEN` do not trigger workflows. Set the `RELEASE_PLEASE_APP_ID` repository variable and `RELEASE_PLEASE_APP_PRIVATE_KEY` secret so release tags start `publish.yml`, or dispatch `publish.yml` manually against the tag.
 

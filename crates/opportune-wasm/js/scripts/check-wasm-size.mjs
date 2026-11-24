@@ -2,12 +2,12 @@
  * The gzipped-size gate for the release `.wasm` a consumer downloads.
  *
  * Two files are involved and both are named in `wasm-size-budget.json`. `source` is
- * what `wasm-pack` writes into `pkg/`; `artifact` is the copy inside `dist/`, which is
- * the tree the manifest publishes and the one the loader instantiates from — so it is
- * the copy whose bytes a consumer pays for, and the copy this gate measures. wasm-pack
- * writes `pkg/` with a `.gitignore` holding `*`, which npm honours, so the published
- * module reaches a consumer only through that copy; a gate measuring `pkg/` would
- * certify a file the tarball does not carry.
+ * what `wasm-pack` writes into `pkg/` for the `web` target; `artifact` is the copy
+ * inside `dist/`, which is the tree the manifest publishes and the one both generated
+ * loaders instantiate from — so it is the copy whose bytes a consumer pays for, and the
+ * copy this gate measures. wasm-pack writes `pkg/` with a `.gitignore` holding `*`,
+ * which npm honours, so the published module reaches a consumer only through that copy;
+ * a gate measuring `pkg/` would certify a file the tarball does not carry.
  *
  * Because the two are copies of one build, the gate also proves they are the same
  * bytes. A `dist/` left over from an earlier build, or a build interrupted between the
@@ -49,7 +49,8 @@ const LEVEL = 9;
 
 /** The commands that write both files, in the order that makes them copies. */
 const BUILD =
-  "wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg --release && " +
+  "wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release && " +
+  "wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release && " +
   "npm --prefix crates/opportune-wasm/js run build";
 
 /** The four bytes every WebAssembly module begins with: the wasm magic `\0asm`. */
@@ -102,8 +103,19 @@ function moduleAt(file) {
   }
   if (!module.subarray(0, MAGIC.length).equals(MAGIC)) {
     throw new Error(
-      `${file} is not a WebAssembly module: ${bytes(module.length)} with no \`\\0asm\` header, ` +
-        `so there is no module to measure. Build it with \`${BUILD}\`.`,
+      `${file} is not a WebAssembly module: ${bytes(module.length)} with no ` +
+        "`\\0asm` header, so there is no module to measure. " +
+        `Build it with \`${BUILD}\`.`,
+    );
+  }
+  // The magic is four bytes a truncated or corrupt file keeps, so the header alone
+  // says nothing a consumer can instantiate. Validation is what the loading runtime
+  // does with the bytes, so it is what decides "a module" here.
+  if (!WebAssembly.validate(module)) {
+    throw new Error(
+      `${file} is not a WebAssembly module: ${bytes(module.length)} carrying the ` +
+        "`\\0asm` header but bytes no runtime validates, so there is no module to " +
+        `measure. Build it with \`${BUILD}\`.`,
     );
   }
   return module;

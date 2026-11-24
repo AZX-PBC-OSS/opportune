@@ -40,9 +40,41 @@ const BUDGET = JSON.parse(readFileSync(join(PACKAGE, "wasm-size-budget.json"), "
 /** The four bytes every WebAssembly module begins with. */
 const WASM_MAGIC = Buffer.from([0x00, 0x61, 0x73, 0x6d]);
 
-/** A module-shaped artefact of `size` bytes: the magic, then incompressible filler. */
+/** The eight bytes every WebAssembly module begins with: the magic, then the version. */
+const HEADER = Buffer.concat([WASM_MAGIC, Buffer.from([0x01, 0x00, 0x00, 0x00])]);
+
+/** `value` as the unsigned LEB128 encoding a section's length is written in. */
+function leb128(value) {
+  const encoded = [];
+  do {
+    let byte = value & 0x7f;
+    value = Math.floor(value / 0x80);
+    if (value !== 0) byte |= 0x80;
+    encoded.push(byte);
+  } while (value !== 0);
+  return Buffer.from(encoded);
+}
+
+/**
+ * A valid WebAssembly module of about `size` bytes: the header, then one custom
+ * section named `padded` holding incompressible filler.
+ *
+ * The filler is random so gzip cannot shrink the module past its ceiling in the
+ * over-budget case, and the section is what carries the module to `size` while
+ * staying valid — the only kind of file the gate may accept.
+ */
 function moduleOf(size) {
-  return Buffer.concat([WASM_MAGIC, randomBytes(Math.max(0, size - WASM_MAGIC.length))]);
+  const name = Buffer.from("padded", "utf8");
+  const filler = randomBytes(Math.max(0, size - HEADER.length - 1 - 1 - name.length));
+  const payload = Buffer.concat([Buffer.from([name.length]), name, filler]);
+  return Buffer.concat([HEADER, Buffer.from([0x00]), leb128(payload.length), payload]);
+}
+
+/** A file with the magic and version but bytes no runtime can validate. */
+function truncatedModule() {
+  // A type section (id 0x01) declaring 127 body bytes that never follow: the
+  // shape an interrupted build writes, and the case the magic check alone accepts.
+  return Buffer.concat([HEADER, Buffer.from([0x01, 0xff, 0x00])]);
 }
 
 /** Writes `module` at `path` under `root`, creating the directories it needs. */
@@ -163,6 +195,32 @@ test("an artefact that is not a WebAssembly module fails closed", () => {
       assert.match(stderr, /wasm-pack build/, "the failure names the build that writes it");
     });
   }
+});
+
+test("a truncated module with a valid magic header fails closed", () => {
+  // The four magic bytes are the one part of a module an interrupted build keeps,
+  // so a gate that stopped at the header would weigh a file no consumer can
+  // instantiate as a very small release. Validation is what the loading runtime
+  // does with the bytes, and it is the check that separates the two.
+  inSandbox({ module: truncatedModule() }, (root) => {
+    const { status, stderr } = gate(root);
+    assert.equal(status, 1, "a corrupt module cannot pass the gate");
+    assert.match(stderr, /not a WebAssembly module/);
+    assert.match(stderr, /no runtime validates/);
+    assert.match(stderr, /wasm-pack build/, "the failure names the build that writes it");
+  });
+});
+
+test("a corrupt published module fails even when the build output is valid", () => {
+  // The source is read first, so the shared-corrupt-file case cannot prove the
+  // published copy is validated too. Here only the artifact is corrupt: skipping
+  // its validation would certify bytes the consumer cannot instantiate.
+  inSandbox({ module: truncatedModule(), source: moduleOf(1024) }, (root) => {
+    const { status, stderr } = gate(root);
+    assert.equal(status, 1, "the published artifact cannot bypass module validation");
+    assert.match(stderr, new RegExp(`${BUDGET.artifact}.*no runtime validates`));
+    assert.match(stderr, /wasm-pack build/);
+  });
 });
 
 test("a missing artefact fails closed and names the build", () => {

@@ -18,8 +18,9 @@
  *
  * Two things the package promises about its own module graph are here too, because
  * both are observable only as a rejection a caller can catch: the values that would
- * otherwise be rewritten silently on their way into JSON, and the runtime the
- * `browser` condition refuses. The `opportune/presets` subpath is the mirror image —
+ * otherwise be rewritten silently on their way into JSON, and the browser/Web Worker
+ * entry's refusal to answer before `opportune/web` has initialised the module. The
+ * `opportune/presets` subpath is the mirror image —
  * it must load no WebAssembly at all, which `module_load_failure.test.mjs` proves from
  * a package whose module is absent.
  *
@@ -78,7 +79,7 @@ import {
 } from "../dist/adapters/graph.js";
 import { eventsListToBlocks, freeBusyToBlocks } from "../dist/adapters/google.js";
 import { OpportuneError as PresetError, businessHours as presetBusinessHours } from "../dist/presets-entry.js";
-import { wasmModule } from "../dist/wasm.js";
+import { wasmModule } from "#wasm";
 import { binding } from "../dist/engine.js";
 
 /** An empty Graph `calendarView` — the conversion reads every payload as a record. */
@@ -741,37 +742,33 @@ test("an Engine handed to an adapter where a document belongs is a rejection", (
   }
 });
 
-test("the browser entry refuses the runtime it was bundled for", async () => {
-  // A browser bundle resolves the manifest's `browser` condition, which is this module
-  // for `.`, `./adapters/graph` and `./adapters/google`. It has to fail at the import:
-  // the alternative is a bundle that ships, runs, and throws a loader error several
-  // frames away once a user's request reaches the engine — or worse, one whose Edge
-  // runtime reports the missing module as an ordinary 500 with no explanation.
-  const error = await import("../dist/browser.js").then(
-    () => assert.fail("the browser entry imported cleanly"),
-    (thrown) => thrown,
-  );
-  assert.equal(error?.name, "OpportuneError", `the browser entry threw: ${error?.stack ?? error}`);
-  assert.equal(error.code, "unsupported_runtime");
+test("the browser entry initialises explicitly instead of refusing the runtime", async () => {
+  // A browser or Web Worker bundle resolves the manifest's `browser`/`worker`
+  // condition to the shared public entry, whose `#wasm` loader is `wasm-web.js`. What
+  // the entry must not do is answer before the application has loaded the module: the
+  // rejection names `opportune/web`'s `init()`, which is the one step a caller has to
+  // take, rather than a loader error several frames away on the first request.
+  const web = await import("../dist/web.js");
+  assert.equal(typeof web.init, "function", "opportune/web exports init");
+  assert.equal(typeof web.initSync, "function", "opportune/web exports initSync");
+  assert.equal(web.default, web.init, "opportune/web's default export is init");
+
+  const { wasmModule } = await import("../dist/wasm-web.js");
+  const error = (() => {
+    try {
+      wasmModule();
+    } catch (thrown) {
+      return thrown;
+    }
+    return assert.fail("the web loader answered before init()");
+  })();
+  assert.equal(error.name, "OpportuneError");
+  assert.equal(error.code, "wasm_unavailable");
   assert.equal(error.path, null);
   assert.deepEqual(error.errors, []);
-  assert.match(error.message, /Node or Bun/);
-  assert.match(error.message, /opportune\/presets/, "the message says what a bundle can use instead");
-  // A Next.js caller is the one this message is most often read for, and the setting
-  // that keeps the engine on Node is not the one that reads as "just run it on Node":
-  // `runtime = "nodejs"` on a route leaves the package in the bundle, which is the
-  // failure this message exists to prevent. A message naming it as an alternative is
-  // the misleading guidance the wording was corrected from, so both halves are pinned.
-  assert.match(
-    error.message,
-    /serverExternalPackages/,
-    "the message does not name the Next.js setting that keeps the engine out of the bundle",
-  );
-  assert.match(
-    error.message,
-    /runtime = "nodejs"` alone/,
-    "the message does not say that `export const runtime = \"nodejs\"` on its own leaves the engine bundled",
-  );
+  assert.match(error.message, /opportune\/web/);
+  assert.match(error.message, /init\(/);
+  assert.match(error.message, /initSync/);
 });
 
 test("the error class is one class across the entry and the pure subpath", () => {
@@ -820,7 +817,8 @@ test("the constants the package states without the module are the module's own v
   // only the compiled module knows. These are the comparisons that keep the copies
   // honest, in the suite both runtimes run: every marker and extended-property string
   // the adapters hand a caller is pinned here, not only the two the package entry
-  // re-exports.
+  // re-exports. `#wasm` is the loader the package itself resolves, so this compares
+  // the constants against the module the engine these tests call actually loaded.
   const wasm = wasmModule();
   assert.equal(VERSION, wasm.version());
   assert.equal(MARKER_TAGS, wasm.marker_tags());

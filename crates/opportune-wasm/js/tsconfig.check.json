@@ -17,10 +17,13 @@
     // `opportune/adapters/graph` or `opportune/presets` has to typecheck against the
     // source too, or the check would need the built `dist/` the tests run from.
     "paths": {
+      "#wasm": ["./src/wasm-node.ts"],
+      "#wasm-glue": ["./src/wasm-glue.d.ts"],
       "opportune": ["./src/index.ts"],
       "opportune/presets": ["./src/presets-entry.ts"],
       "opportune/adapters/graph": ["./src/adapters/graph.ts"],
-      "opportune/adapters/google": ["./src/adapters/google.ts"]
+      "opportune/adapters/google": ["./src/adapters/google.ts"],
+      "opportune/web": ["./src/web.ts"]
     }
   }
 }

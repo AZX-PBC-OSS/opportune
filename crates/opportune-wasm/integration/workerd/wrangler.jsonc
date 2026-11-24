@@ -1,0 +1,18 @@
+{
+  // The Worker this harness runs. Tests execute inside the runtime this entry names;
+  // there is no assets binding, no route and no remote binding, because the whole run is
+  // one local workerd instance.
+  "name": "opportune-workerd-integration",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-18",
+  // A Worker has no filesystem, so the only way a `.wasm` reaches it is as a module the
+  // bundle compiled. `fallthrough` keeps every other import on Wrangler's default rule
+  // set; without this rule the package's static `.wasm` import has no loader.
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["**/*.wasm"],
+      "fallthrough": true
+    }
+  ]
+}
