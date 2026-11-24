@@ -16,7 +16,7 @@
  * The version of the `opportune` engine this package was built from, matching
  * `package.json` and the Rust crate version.
  */
-export const VERSION: string = "0.1.0"; // x-release-please-version
+export const VERSION: string = "0.2.0"; // x-release-please-version
 
 /** The extended property a caller's own space-separated tags are read from. */
 export const MARKER_TAGS: string = "opportune.tags";
