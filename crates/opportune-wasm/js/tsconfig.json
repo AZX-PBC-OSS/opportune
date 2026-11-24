@@ -18,6 +18,10 @@
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    // The published tree is `tsc` output a bundler may reduce further, and a construct
+    // with runtime semantics beyond erasure — an `enum`, a parameter property, a
+    // `namespace` with a value — would emit code a type-stripping loader cannot run.
+    "erasableSyntaxOnly": true,
     "skipLibCheck": false,
     "types": ["node"],
     // No `paths` here. The published-name alias lives in `tsconfig.check.json`:

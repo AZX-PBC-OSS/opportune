@@ -7,16 +7,17 @@
  * arguments, the class those builders raise, projections that read an answer they are
  * handed, constants stated as strings, and the generated types, which erase. Nothing
  * in this module graph imports the compiled module or `node:module`, so a browser
- * bundle, an Edge route or a client component can import it and call it with no
+ * bundle or a client component can import it and call it with no
  * WebAssembly instantiation and no Node built-in. The engine itself is not here: it
- * runs on Node and Bun, and `opportune` says so when a browser resolves it.
+ * runs on Node, Bun, Cloudflare Workers, browsers and Web Workers, and a browser or
+ * Web Worker reaches it through `opportune/web` after `init()`.
  *
  * The error class and the document types are here for the same reason the builders
  * are: a bundle that builds a request, or reads one back from its own storage, needs
  * to recognise the failure a builder raises and to name the document it holds — and
- * importing `opportune` for either would resolve a module that refuses a browser. The
+ * importing `opportune` for either would resolve a module that is not initialised. The
  * constants are here because stamping a tag or asking a provider for an extended
- * property is a string a client-side or Edge bundle reads, with no engine behind it.
+ * property is a string a client-side bundle reads, with no engine behind it.
  *
  * ```ts
  * import { businessHours, capPerDay, MARKER_TAGS, person, singleGoal } from "opportune/presets";

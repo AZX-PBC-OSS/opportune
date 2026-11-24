@@ -1,4 +1,4 @@
-# Four dependency graphs, four lanes. Commit titles are Conventional Commits so the
+# Six dependency graphs, six lanes. Commit titles are Conventional Commits so the
 # commitlint gate accepts them and release-please can parse them; the minor/patch groups
 # collapse routine bumps into one PR per ecosystem instead of one per package.
 version: 2
@@ -39,6 +39,29 @@ updates:
       prefix: "chore(deps-js)"
     groups:
       js-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # The runtime integration harnesses are private npm projects with their own lockfiles,
+  # so they need their own lanes: a pinned Workers plugin, Vite, Vitest, or Playwright
+  # otherwise never receives an upstream fix.
+  - package-ecosystem: npm
+    directory: "/crates/opportune-wasm/integration/workerd"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps-workerd)"
+    groups:
+      workerd-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: "/crates/opportune-wasm/integration/web"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps-web)"
+    groups:
+      web-minor-patch:
         update-types: ["minor", "patch"]
 
   # Every action in this repo is pinned to a commit SHA, which is exactly why this lane

@@ -2,12 +2,12 @@
  * The gzipped-size gate for the release `.wasm` a consumer downloads.
  *
  * Two files are involved and both are named in `wasm-size-budget.json`. `source` is
- * what `wasm-pack` writes into `pkg/`; `artifact` is the copy inside `dist/`, which is
- * the tree the manifest publishes and the one the loader instantiates from — so it is
- * the copy whose bytes a consumer pays for, and the copy this gate measures. wasm-pack
- * writes `pkg/` with a `.gitignore` holding `*`, which npm honours, so the published
- * module reaches a consumer only through that copy; a gate measuring `pkg/` would
- * certify a file the tarball does not carry.
+ * what `wasm-pack` writes into `pkg/` for the `web` target; `artifact` is the copy
+ * inside `dist/`, which is the tree the manifest publishes and the one both generated
+ * loaders instantiate from — so it is the copy whose bytes a consumer pays for, and the
+ * copy this gate measures. wasm-pack writes `pkg/` with a `.gitignore` holding `*`,
+ * which npm honours, so the published module reaches a consumer only through that copy;
+ * a gate measuring `pkg/` would certify a file the tarball does not carry.
  *
  * Because the two are copies of one build, the gate also proves they are the same
  * bytes. A `dist/` left over from an earlier build, or a build interrupted between the
@@ -35,7 +35,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { gzipSync } from "node:zlib";
 
 /** The package root: this script lives in `scripts/`. */
@@ -49,7 +49,8 @@ const LEVEL = 9;
 
 /** The commands that write both files, in the order that makes them copies. */
 const BUILD =
-  "wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg --release && " +
+  "wasm-pack build crates/opportune-wasm --target web --out-dir js/pkg --release --locked && " +
+  "wasm-pack build crates/opportune-wasm --target nodejs --out-dir js/pkg-node --release --locked && " +
   "npm --prefix crates/opportune-wasm/js run build";
 
 /** The four bytes every WebAssembly module begins with: the wasm magic `\0asm`. */
@@ -72,6 +73,25 @@ function path(value, field) {
 }
 
 /**
+ * `value` as the path the budget states, resolved under `directory` — or the failure
+ * naming the field. A budget is a committed file a reviewer reads, and a path in it
+ * decides which file is measured and therefore what the gate certifies: an absolute
+ * path, a `..` segment or a directory prefix that only looks like `dist/` would let
+ * the gate measure something this package neither builds nor ships. The comparison is
+ * on the resolved path plus a separator, so `dist-other/` does not pass as `dist/`.
+ */
+function under(value, field, directory) {
+  const base = resolve(ROOT, directory);
+  const target = resolve(ROOT, path(value, field));
+  if (!target.startsWith(base + sep)) {
+    throw new Error(
+      `${BUDGET}: \`${field}\` must name a file under \`${directory}/\`, not ${value}`,
+    );
+  }
+  return value;
+}
+
+/**
  * The committed budget: the artefact it measures, the build output it is a copy of,
  * the recorded baseline and the ceiling.
  */
@@ -82,9 +102,19 @@ function budget() {
   } catch (cause) {
     throw new Error(`${BUDGET} cannot be read: ${cause.message}`, { cause });
   }
+  const artifact = under(document.artifact, "artifact", "dist");
+  const source = under(document.source, "source", "pkg");
+  // The gate proves the two are the same bytes, so one path standing for both makes
+  // that comparison a tautology and leaves the copy it exists to check unread.
+  if (artifact === source) {
+    throw new Error(
+      `${BUDGET}: \`artifact\` and \`source\` must name different files; ` +
+        "they are the published copy and the build output it is a copy of",
+    );
+  }
   return {
-    artifact: path(document.artifact, "artifact"),
-    source: path(document.source, "source"),
+    artifact,
+    source,
     baselineBytes: byteCount(document.baselineBytes, "baselineBytes"),
     budgetBytes: byteCount(document.budgetBytes, "budgetBytes"),
   };
@@ -102,8 +132,19 @@ function moduleAt(file) {
   }
   if (!module.subarray(0, MAGIC.length).equals(MAGIC)) {
     throw new Error(
-      `${file} is not a WebAssembly module: ${bytes(module.length)} with no \`\\0asm\` header, ` +
-        `so there is no module to measure. Build it with \`${BUILD}\`.`,
+      `${file} is not a WebAssembly module: ${bytes(module.length)} with no ` +
+        "`\\0asm` header, so there is no module to measure. " +
+        `Build it with \`${BUILD}\`.`,
+    );
+  }
+  // The magic is four bytes a truncated or corrupt file keeps, so the header alone
+  // says nothing a consumer can instantiate. Validation is what the loading runtime
+  // does with the bytes, so it is what decides "a module" here.
+  if (!WebAssembly.validate(module)) {
+    throw new Error(
+      `${file} is not a WebAssembly module: ${bytes(module.length)} carrying the ` +
+        "`\\0asm` header but bytes no runtime validates, so there is no module to " +
+        `measure. Build it with \`${BUILD}\`.`,
     );
   }
   return module;

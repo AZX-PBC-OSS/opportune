@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import {
   Engine,
@@ -42,11 +43,12 @@ import {
   singleGoal,
   weeklyHours,
 } from "../dist/index.js";
-import { calendarViewToBlocks } from "../dist/adapters/graph.js";
+import { calendarViewToBlocks, workingHoursToRule } from "../dist/adapters/graph.js";
 
-/** The built tree the loader resolves from, and the module it reads beside it. */
-const DIST = join(import.meta.dirname, "..", "dist");
-const MODULE = join("pkg", "opportune_wasm.cjs");
+/** The package root this suite belongs to, the built tree, and the glue the loader resolves. */
+const PACKAGE = join(import.meta.dirname, "..");
+const DIST = join(PACKAGE, "dist");
+const GLUE = join("pkg", "opportune_wasm.cjs");
 const WASM = join("pkg", "opportune_wasm_bg.wasm");
 
 /** The `meta` every engine answer carries, and the projection now demands. */
@@ -93,12 +95,14 @@ function thrown(call) {
  *
  * The copy's own modules are what the cases import, so its loader resolves beside
  * the copy rather than the checked-in tree — which is the only way to reach the
- * failures a deployment sees.
+ * failures a deployment sees. The manifest travels with it because the loader is
+ * selected by `package.json#imports`, which a bare `dist/` copy has no `#wasm` for.
  */
 async function damaged(damage, check) {
   const dir = mkdtempSync(join(tmpdir(), "opportune-adoption-"));
   try {
     cpSync(DIST, join(dir, "dist"), { recursive: true });
+    cpSync(join(PACKAGE, "package.json"), join(dir, "package.json"));
     damage(join(dir, "dist"));
     return await check((name) => import(pathToFileURL(join(dir, "dist", name)).href));
   } finally {
@@ -264,9 +268,12 @@ function declaredCodes() {
   assert.notEqual(start, -1, "vocabulary.ts declares `OpportuneErrorCode`");
   const end = source.indexOf(";", start);
   assert.notEqual(end, -1, "the `OpportuneErrorCode` union ends with a semicolon");
-  return [...source.slice(start, end).matchAll(/^\s*\|\s*"([a-z0-9_]+)"/gm)].map(
-    ([, code]) => code,
-  );
+  // Every string literal inside the declaration is a code, wherever the formatter puts it:
+  // one per line with a leading `|`, several on one line, or the first literal beside the
+  // `=`. Requiring a leading `|` per line made the extraction depend on formatting rather
+  // than on the union, which is what this case exists to read. The open tail is
+  // `(string & {})`, so it contributes no literal.
+  return [...source.slice(start, end).matchAll(/"([a-z0-9_]+)"/g)].map(([, code]) => code);
 }
 
 test("every error code the package states answers the status it is classified as", () => {
@@ -297,6 +304,111 @@ test("every error code the package states answers the status it is classified as
   for (const value of [null, undefined, {}, "invalid_request"]) {
     assert.equal(httpStatusForError(value), 500, JSON.stringify(value) ?? "undefined");
   }
+});
+
+test("a category map that is a collection is refused rather than read as no mapping", () => {
+  // The category map is a document, but `JSON.stringify` writes no members for a `Map`,
+  // so a caller who wrote `new Map([["A", "tag/a"]])` reached the engine as an empty map
+  // and every event was converted as if no category were mapped. The adapter refuses the
+  // type instead, naming the field the caller has to fix.
+  const error = thrown(() =>
+    calendarViewToBlocks(CALENDAR_VIEW, "UTC", { categoryMap: new Map([["A", "tag/a"]]) }),
+  );
+  assert.equal(error.code, "invalid_type");
+  assert.match(error.message, /categoryMap/);
+  assert.match(error.message, /not a value of type map/);
+
+  // The plain mapping is the document the adapter reads, so the rejection above is the
+  // collection and not a map field the conversion refuses.
+  assert.equal(
+    calendarViewToBlocks(CALENDAR_VIEW, "UTC", { categoryMap: { A: "tag/a" } }).status,
+    "available",
+  );
+});
+
+test("a category map built in another realm is a plain mapping", () => {
+  // A browser iframe or a Node `vm` context builds a plain object against its own
+  // realm's `Object.prototype`, not this one's. It is still a mapping: `JSON.stringify`
+  // writes its members exactly as it writes a current-realm object literal's, so the
+  // adapter must not refuse it as a class instance merely because the prototypes differ.
+  const map = runInNewContext('({ A: "tag/a" })');
+  assert.notEqual(
+    Object.getPrototypeOf(map),
+    Object.prototype,
+    "the fixture is not an object from this realm",
+  );
+  assert.equal(
+    calendarViewToBlocks(CALENDAR_VIEW, "UTC", { categoryMap: map }).status,
+    "available",
+  );
+});
+
+/** One mailbox's `workingHours`, the shape the Graph fixture carries. */
+const WORKING_HOURS = JSON.stringify({
+  daysOfWeek: ["monday"],
+  startTime: "09:00:00.0000000",
+  endTime: "17:00:00.0000000",
+  timeZone: { name: "UTC" },
+});
+
+test("a working-hours selector the wire writes as none is refused instead of leaving the rule's default", () => {
+  // The outcome carries a rule the caller stores and feeds back to the engine, and `who`
+  // and `when` are the caller's own selectors. A value the wire writes as no selector at
+  // all — a function or a symbol (no member), or an object that spells `{}` or `null` —
+  // used to leave the stored rule with its own default (every host, every booking), so a
+  // policy the caller meant to narrow silently widened. The adapter refuses the value
+  // instead, naming the field the caller has to fix.
+  const dropped = [
+    ["a function", () => true],
+    ["a symbol", Symbol("vip")],
+    ["a Map", new Map([["ids", ["ana"]]])],
+    ["a Set", new Set(["ana"])],
+    ["a RegExp", /ana/],
+    ["an empty object", {}],
+    ["an invalid Date", new Date(Number.NaN)],
+  ];
+  for (const [field, name] of [["who", "who"], ["when", "when"]]) {
+    for (const [label, unspellable] of dropped) {
+      const error = thrown(() => workingHoursToRule(WORKING_HOURS, { [field]: unspellable }));
+      assert.equal(error.code, "invalid_type", `${field} as ${label}`);
+      assert.match(error.message, new RegExp(`\`${field}\``), `names the ${field} it refused`);
+      assert.match(error.message, /wire can carry/, "says why it refused the value");
+    }
+  }
+
+  // The check reads the JSON spelling: a class instance whose own fields the wire reads
+  // is the selector it spells, and a boxed `true` and `null` keep the meaning the wire
+  // gives them rather than being refused.
+  class Ids {
+    constructor() {
+      this.ids = ["ana"];
+    }
+  }
+  const own = workingHoursToRule(WORKING_HOURS, { who: new Ids() });
+  assert.equal(own.status, "available");
+  assert.deepEqual(JSON.parse(JSON.stringify(own)).rule.who, { ids: ["ana"] });
+  const boxed = workingHoursToRule(WORKING_HOURS, { who: new Boolean(true) });
+  assert.equal(JSON.parse(JSON.stringify(boxed)).rule.who, true, "a boxed true spells `true`");
+  const unconditional = workingHoursToRule(WORKING_HOURS, { who: true });
+  assert.equal(unconditional.rule.who, true, "`true` stays the unconditional selector");
+  const defaulted = workingHoursToRule(WORKING_HOURS, { who: null });
+  assert.equal(defaulted.rule.who, null, "`null` stays the wire's default name");
+
+  // A selector the wire carries replaces the rule's default as before, and is still on
+  // the document after the round trip the caller stores it by.
+  const carried = workingHoursToRule(WORKING_HOURS, { who: { ids: ["ana"] } });
+  assert.equal(carried.status, "available");
+  assert.deepEqual(carried.rule.who, { ids: ["ana"] });
+  assert.deepEqual(JSON.parse(JSON.stringify(carried)).rule.who, { ids: ["ana"] });
+
+  // A `Date` is not one of the dropped shapes: a valid one spells its instant, so it
+  // stays on the rule and the engine rejects it at the field the caller wrote.
+  const dated = workingHoursToRule(WORKING_HOURS, { who: new Date("2027-06-14T00:00:00Z") });
+  assert.equal(
+    JSON.parse(JSON.stringify(dated)).rule.who,
+    "2027-06-14T00:00:00.000Z",
+    "a valid Date is carried as its spelling rather than read as no selector",
+  );
 });
 
 test("`null` on an optional builder field is that field's default", () => {
@@ -415,7 +527,7 @@ test("a module the bundler did not copy says how to keep the package external", 
   // rebuilding both succeed and change nothing. That is the failure a serverless
   // deployment meets first, and the one the reinstall advice cannot fix.
   await damaged(
-    (dir) => rmSync(join(dir, MODULE)),
+    (dir) => rmSync(join(dir, GLUE)),
     async (load) => {
       const pkg = await load("index.js");
       const error = thrown(() => new pkg.Engine());

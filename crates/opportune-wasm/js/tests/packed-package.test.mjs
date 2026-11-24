@@ -1,26 +1,24 @@
 /**
- * What the tarball the publish job uploads actually contains, and how it resolves.
+ * What the tarball `npm publish` uploads contains, and whether the standard package
+ * validators accept it.
  *
- * Every other test in this suite drives `dist/` by relative path, which is the tree
- * `npm publish` packs but not the way a consumer reaches it: npm decides what travels
- * from `files`, and a consumer resolves through the manifest's `exports`. A `files`
- * entry dropped in a review, or a subpath added to `exports` and not to the packed
- * tree, publishes a package that installs and then cannot be imported — and the
- * publish job would still be green, because it proves `dist/` rather than the
- * artefact. Both licence copies and the README are checked here for the same reason:
- * the lint gate compares them on disk, and this is what puts them in the tarball.
+ * npm decides what ships from `files`, and a consumer resolves it through `exports` and
+ * the emitted declarations. Rather than assert that map against a hand-written resolver,
+ * this suite runs the tools that own those questions:
  *
- * The resolution case goes the whole way: it packs, installs the tarball into a
- * temporary project and imports every declared subpath by name from there, so the
- * resolver of whichever runtime runs the suite reads the installed `exports` map — the
- * one step no relative import performs, and the one a subpath renamed or repointed in
- * the map would break. A second consumer script `require`s the package from the same
- * install, because the CommonJS entry a Node application reaches for is the same
- * `exports` lookup under another loader.
+ * - `publint` checks the manifest's `files`, `exports`, `main`, `types` and `sideEffects`
+ *   against the packed tree;
+ * - `@arethetypeswrong/cli` checks every entry point's runtime and declaration resolution
+ *   for the packed tarball under Node's ESM/CJS and bundler rules;
+ * - `tsc` compiles real consumer projects (no DOM for the root, DOM and WebWorker for
+ *   `opportune/web`, and a Node project with no DOM or WebWorker lib at all) from the
+ *   installed tarball, so the declarations a consumer receives are what is checked.
  *
- * `npm pack --dry-run` computes the real packlist without writing anything, and the
- * resolution case writes only inside a temporary directory, so neither touches the
- * checkout and both run offline against the built package. Build it first:
+ * The behavioural cases that tools cannot express stay here: a CommonJS consumer builds
+ * an `Engine` synchronously, `opportune/schema.json` reads through both loaders, and the
+ * packlist carries exactly one `.wasm` and no source or harness tree.
+ *
+ * Build the package first:
  *
  * ```sh
  * make wasm && npm --prefix crates/opportune-wasm/js test
@@ -30,7 +28,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -41,389 +38,215 @@ const PACKAGE = join(import.meta.dirname, "..");
 /** The manifest `exports` and `files` are read from. */
 const MANIFEST = JSON.parse(readFileSync(join(PACKAGE, "package.json"), "utf8"));
 
-/**
- * The TypeScript compiler the package's own tooling pins.
- *
- * The consumer compile below uses the compiler's own API rather than spawning the
- * `tsc` script: the suite runs under Node and under Bun, and both execute this
- * JavaScript, so the lane that proves the declarations is the lane that declares the
- * runtime rather than whichever binary the script's shebang finds.
- */
-const TS = createRequire(import.meta.url)("typescript");
-
 /** The command that builds the tree the tarball packs. */
 const BUILD = "make wasm";
 
+/** The runtime floors the documentation states, as `engines` has to spell them. */
+const RUNTIMES = { bun: ">=1.4.2", node: ">=24" };
+
+/** The page that states, to a consumer, which runtimes the package installs onto. */
+const WASM_DOC = join(PACKAGE, "..", "..", "..", "docs", "wasm.md");
+
 /**
- * Every path the tarball holds, as `npm pack` lists it.
+ * The longest a package-manager, compiler or consumer child may take.
  *
- * `--json` keeps the report on stdout with npm's notices on stderr, and
- * `--ignore-scripts` makes the measurement independent of whatever lifecycle script
- * the manifest grows later.
+ * Every child here is local — `npm pack`, an offline install with no runtime dependency,
+ * `tsc`, the validators, and a consumer that builds one engine — so this is a bound that
+ * keeps a wedged child from holding the lane open, not a deadline the happy path meets.
+ * It is also the only bound that can fire: `spawnSync` blocks the event loop, so a
+ * `timeout` on the test itself cannot interrupt it.
  */
+const CHILD_TIMEOUT_MS = 120_000;
+
+/** The four bytes every WebAssembly module begins with. */
+const WASM_MAGIC = "\0asm";
+
+/** A child's status, signal, spawn error and streams, as a failure a reader can act on. */
+function report(run) {
+  return [
+    `status: ${String(run.status)}`,
+    `signal: ${String(run.signal)}`,
+    `error: ${run.error?.message ?? "none"}`,
+    `stdout: ${JSON.stringify(run.stdout ?? "")}`,
+    `stderr: ${JSON.stringify(run.stderr ?? "")}`,
+  ].join("\n");
+}
+
+/**
+ * Every subpath the manifest declares, as the specifier a consumer imports, the file the
+ * manifest says it resolves to, and the path the test packs.
+ *
+ * Derived from the manifest so a subpath added later cannot escape the consumers below:
+ * the executable surface guard fails until a line says what the new subpath is for, and
+ * the resolution loop imports and resolves every entry.
+ */
+const EXPORTS = Object.entries(MANIFEST.exports).map(([subpath, target]) => {
+  const path = (typeof target === "string" ? target : target.default).replace(/^\.\//, "");
+  return {
+    subpath,
+    specifier: subpath === "." ? MANIFEST.name : `${MANIFEST.name}/${subpath.replace(/^\.\//, "")}`,
+    target: path,
+  };
+});
+
+/** The subpaths a consumer executes as modules, as opposed to JSON documents and the binary. */
+const EXECUTABLE_EXPORTS = EXPORTS.filter((entry) => entry.target.endsWith(".js"));
+
+/** The JSON subpaths, which a consumer reads with an import attribute. */
+const JSON_EXPORTS = EXPORTS.filter((entry) => entry.target.endsWith(".json"));
+
+/** The one module binary, which a bundler turns into a URL rather than a module. */
+const [WASM_ASSET] = EXPORTS.filter((entry) => entry.target.endsWith(".wasm"));
+
+assert.ok(EXPORTS.length > 0, "the manifest declares no export for a consumer to reach");
+assert.equal(
+  new Set(EXPORTS.map((entry) => entry.specifier)).size,
+  EXPORTS.length,
+  "two declared subpaths share one specifier",
+);
+assert.notDeepEqual(EXECUTABLE_EXPORTS, [], "the manifest declares no executable subpath");
+assert.notDeepEqual(JSON_EXPORTS, [], "the manifest declares no JSON subpath");
+assert.ok(WASM_ASSET !== undefined, "the manifest declares no module binary subpath");
+
+/**
+ * What a consumer reads from each executable subpath.
+ *
+ * A new `.js` export fails the guard below until a line here names what a consumer gets
+ * from it, so the ESM consumer cannot silently skip a subpath the manifest added.
+ */
+const SURFACE = {
+  ".": ["Engine", "VERSION", "defaultLimits", "findAvailabilityJson", "OpportuneError"],
+  "./web": ["init", "initSync", "default"],
+  "./presets": ["businessHours", "singleGoal", "person", "MARKER_TAGS", "OpportuneError"],
+  "./adapters/graph": ["calendarViewToBlocks", "MARKER_TAGS", "EXTENDED_PROPERTY_EXPAND"],
+  "./adapters/google": ["eventsListToBlocks", "MARKER_TAGS"],
+};
+assert.deepEqual(
+  EXECUTABLE_EXPORTS.map((entry) => entry.subpath).sort(),
+  Object.keys(SURFACE).sort(),
+  "an executable subpath has no consumer surface check: add it to SURFACE and to the consumer",
+);
+
+/** Every path the tarball holds, as `npm pack` lists it. */
 function packedFiles() {
   const run = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: PACKAGE,
     encoding: "utf8",
+    timeout: CHILD_TIMEOUT_MS,
   });
-  assert.equal(run.error, undefined, `npm pack did not start: ${run.error?.message}`);
-  assert.equal(run.status, 0, `npm pack failed: ${run.stderr}`);
-  const [report] = JSON.parse(run.stdout);
-  return report.files.map((entry) => entry.path);
+  assert.equal(run.error, undefined, `npm pack did not finish:\n${report(run)}`);
+  assert.equal(run.signal, null, `npm pack was killed:\n${report(run)}`);
+  assert.equal(run.status, 0, `npm pack failed:\n${report(run)}`);
+  const [listing] = JSON.parse(run.stdout);
+  return listing.files.map((entry) => entry.path);
 }
-
-/** `target` as it appears in the packlist: the `exports` map spells it `./…`. */
-function packedPath(target) {
-  return target.replace(/^\.\//, "");
-}
-
-/** `subpath` as a consumer spells it: `.` is the bare name, the rest are joined to it. */
-function specifier(subpath) {
-  return subpath === "." ? MANIFEST.name : `${MANIFEST.name}/${subpath.slice("./".length)}`;
-}
-
-/**
- * The conditions every `exports` entry has to declare.
- *
- * `types` is what a TypeScript consumer resolves before `default`, and an entry that
- * loses it still packs, installs, imports and runs: every typed caller gets "could not
- * find a declaration file" instead of the generated types. Nothing else in the
- * repository reads this map — `tsc` compiles `src/`, and the packlist case below walks
- * only the conditions that are present, so a dropped one leaves it green.
- */
-const CONDITIONS = ["types", "default"];
-
-/**
- * The subpaths the engine itself backs, and one binding each has to expose.
- *
- * These are the entries that also declare `browser` and `node`, because they are the
- * ones whose module only runs on one of the two. The binding below is exported by each
- * module and by no other, which is what makes the comparison with the resolver say
- * something; the others the documentation names are in `DOCUMENTED`.
- */
-const ENGINE = {
-  ".": "Engine",
-  "./adapters/graph": "EXTENDED_PROPERTY_EXPAND",
-  "./adapters/google": "freeBusyToBlocks",
-};
-
-/**
- * The subpaths the documentation tells a consumer to import, and one binding each has
- * to expose.
- *
- * This is the expectation the manifest cannot supply about itself. Comparing the
- * resolver's answer with the map it was resolved from proves only that the runtime
- * obeys the map, so a `default` repointed at some other file the tarball also carries
- * needs a name that lives outside it. `README.md` and `docs/wasm.md` are the pages that
- * name these four imports; `./presets` is the one a browser bundle may import, because
- * it reaches no WebAssembly.
- */
-const DOCUMENTED = { ...ENGINE, "./presets": "businessHours" };
-
-/**
- * The browser stub every engine-backed subpath resolves to under the `browser`
- * condition: one module, one explanation of the runtime the engine needs.
- */
-const BROWSER = "./dist/browser.js";
-
-/**
- * The conditions a bundler for a non-Node runtime applies, and the manifest entry
- * each has to reach the stub through.
- *
- * `browser` is the one every bundler sets. `edge-light` is the working group's
- * condition for a bundler target like Vercel's, and `worker` is Cloudflare's: a
- * runtime that names one of them gets the stub at the import rather than a bundle
- * that throws from the loader for its users. They are asserted separately because
- * each is a key a manifest edit can drop on its own — `browser` staying green while
- * `edge-light` falls through to `node`.
- */
-const NON_NODE_CONDITIONS = ["browser", "edge-light", "worker"];
-
-/**
- * The subpaths that name one file directly instead of a condition map.
- *
- * `./package.json` is the manifest itself, which a tool reads to learn the version
- * and the package's own metadata. `./schema.json` is the exported schema the
- * generated types derive from, so a consumer can validate a document with the same
- * Draft 2020-12 bundle the engine validates against. Neither names a condition
- * because neither has runtime variants: there is one manifest and one schema per
- * installed package.
- */
-const PASSTHROUGH = new Set(["./package.json", "./schema.json"]);
-
-/** The declared subpaths that resolve through a condition map. */
-const MAPPED = Object.entries(MANIFEST.exports).filter(([, target]) => typeof target === "object");
-
-/**
- * The consumer's own resolution, as the runtime running the suite performs it.
- *
- * Writes a script into an installed project and runs it there, so `import` reads the
- * installed manifest's `exports` map: the relative `../dist/…` imports every other
- * suite uses never consult it, so a subpath renamed or repointed in the map leaves all
- * of them green while every consumer resolves somewhere else. The script is spawned
- * with `process.execPath`, which is Node under `npm test` and Bun under `bun test`, so
- * each lane proves the installed-package path of the runtime that lane runs — and the
- * Bun lane is what makes the manifest's `engines.bun` more than a claim.
- *
- * @returns one `{ specifier, resolved, names }` per declared subpath.
- */
-function resolvedByConsumer(dir) {
-  const subpaths = MAPPED.map(([subpath]) => subpath);
-  const consumer = join(dir, "consumer.mjs");
-  writeFileSync(
-    consumer,
-    [
-      `const subpaths = ${JSON.stringify(subpaths)};`,
-      `const name = ${JSON.stringify(MANIFEST.name)};`,
-      "const out = [];",
-      "for (const subpath of subpaths) {",
-      '  const specifier = subpath === "." ? name : `${name}/${subpath.slice(2)}`;',
-      "  const resolved = import.meta.resolve(specifier);",
-      "  const loaded = await import(specifier);",
-      "  out.push({ specifier, resolved, names: Object.keys(loaded) });",
-      "}",
-      "console.log(JSON.stringify(out));",
-    ].join("\n"),
-  );
-  const run = spawnSync(process.execPath, [consumer], { cwd: dir, encoding: "utf8" });
-  assert.equal(
-    run.status,
-    0,
-    `a consumer could not import the installed package: ${run.stderr.trim() || run.stdout.trim()}`,
-  );
-  return JSON.parse(run.stdout);
-}
-
-/**
- * The package as a CommonJS application reaches it, from the same installed tarball.
- *
- * A server written in CommonJS `require`s its dependencies, and that lookup reads the
- * same `exports` map through a loader that cannot run top-level `await`: a package that
- * needs one publishes a module CommonJS cannot load, and the failure only ever appears
- * in a consumer's application.
- *
- * @returns the version and one preset builder, as the required package reports them.
- */
-function requiredByConsumer(dir) {
-  const consumer = join(dir, "consumer.cjs");
-  writeFileSync(
-    consumer,
-    [
-      `const pkg = require(${JSON.stringify(MANIFEST.name)});`,
-      `const presets = require(${JSON.stringify(`${MANIFEST.name}/presets`)});`,
-      `const manifest = require(${JSON.stringify(`${MANIFEST.name}/package.json`)});`,
-      "console.log(JSON.stringify({",
-      "  version: pkg.VERSION,",
-      "  rule: presets.businessHours().kind,",
-      "  manifestVersion: manifest.version,",
-      "}));",
-    ].join("\n"),
-  );
-  const run = spawnSync(process.execPath, [consumer], { cwd: dir, encoding: "utf8" });
-  assert.equal(
-    run.status,
-    0,
-    `require() of the installed package failed: ${run.stderr.trim() || run.stdout.trim()}`,
-  );
-  return JSON.parse(run.stdout);
-}
-
-/**
- * The exported schema as an installed consumer reaches it.
- *
- * `opportune/schema.json` is the document the generated types derive from, so a
- * consumer that validates a request before sending it — with Ajv, or with a
- * provider's own schema validation — reads the same Draft 2020-12 bundle the
- * engine validates against instead of restating it. Both loaders are exercised:
- * the subpath is one file with no condition map, and a JSON import needs an import
- * attribute while `require` needs none. A manifest entry that dropped the subpath,
- * a `files` list that stopped packing it, or a document that lost the two unions
- * `Request` and `Response` name fails here rather than in the consumer.
- *
- * @returns the `$schema` URI and the shapes of the two document definitions, as
- *   each loader reports them.
- */
-function schemaByConsumer(dir) {
-  const consumer = join(dir, "schema.mjs");
-  const specifier = JSON.stringify(`${MANIFEST.name}/schema.json`);
-  writeFileSync(
-    consumer,
-    [
-      'import { createRequire } from "node:module";',
-      `import schema from ${specifier} with { type: "json" };`,
-      `const required = createRequire(import.meta.url)(${specifier});`,
-      "const shape = (document) => ({",
-      "  $schema: document.$schema,",
-      "  request: typeof document.$defs?.Request,",
-      "  response: typeof document.$defs?.Response,",
-      "});",
-      "console.log(JSON.stringify({ imported: shape(schema), required: shape(required) }));",
-    ].join("\n"),
-  );
-  const run = spawnSync(process.execPath, [consumer], { cwd: dir, encoding: "utf8" });
-  assert.equal(
-    run.status,
-    0,
-    `an installed consumer could not read the exported schema: ${run.stderr.trim() || run.stdout.trim()}`,
-  );
-  return JSON.parse(run.stdout);
-}
-
-/**
- * The package as a bundler for a non-Node runtime resolves it, from the same
- * installed tarball.
- *
- * Each of {@link NON_NODE_CONDITIONS} is a condition no other case in the suite ever
- * supplies: `import.meta.resolve` and every relative import use the default set.
- * Passing one to the runtime under test is what proves the manifest actually routes
- * those subpaths to the stub — an `exports` entry that lost its `browser` key, or one
- * pointing at a module that does not exist, still passes every engine case. The
- * script records the rejection's `name` and `code` for each subpath, and `"imported"`
- * for the ones that load.
- *
- * @returns one entry per declared subpath: `"imported"`, or the rejection's shape.
- */
-function resolvedForCondition(dir, condition) {
-  const consumer = join(dir, `consumer.${condition}.mjs`);
-  writeFileSync(
-    consumer,
-    [
-      `const subpaths = ${JSON.stringify(MAPPED.map(([subpath]) => subpath))};`,
-      `const name = ${JSON.stringify(MANIFEST.name)};`,
-      "const out = {};",
-      "for (const subpath of subpaths) {",
-      '  const specifier = subpath === "." ? name : `${name}/${subpath.slice(2)}`;',
-      "  try {",
-      "    await import(specifier);",
-      '    out[specifier] = "imported";',
-      "  } catch (error) {",
-      "    out[specifier] = { name: error.name, code: error.code, message: error.message };",
-      "  }",
-      "}",
-      "console.log(JSON.stringify(out));",
-    ].join("\n"),
-  );
-  const run = spawnSync(process.execPath, [`--conditions=${condition}`, consumer], {
-    cwd: dir,
-    encoding: "utf8",
-  });
-  assert.equal(
-    run.status,
-    0,
-    `a ${condition} bundle could not load the installed package: ` +
-      `${run.stderr.trim() || run.stdout.trim()}`,
-  );
-  return JSON.parse(run.stdout);
-}
-
-/**
- * The runtime floors the documentation states, as `engines` has to spell them.
- *
- * This is the expectation the manifest cannot supply about itself, like `CONDITIONS`
- * and `DOCUMENTED` above: an `engines` entry dropped in a review still packs, installs
- * and imports, and nothing else in the repository reads it, so a supported runtime a
- * consumer cannot see from the manifest otherwise ships silently.
- */
-const RUNTIMES = { bun: ">=1.4.2", node: ">=24" };
 
 /** The packlist, computed once for the cases below. */
 const FILES = packedFiles();
 
-/**
- * The package packed into `dir` and installed there, as a consumer receives it.
- *
- * `--pack-destination` keeps the tarball out of the checkout, and the file is found in
- * the empty directory rather than parsed out of npm's stdout, whose shape is not the
- * assertion's subject. `--offline`: the package declares no runtime dependency, so the
- * install resolves nothing and needs no registry. `--ignore-scripts` on both, so the
- * install runs no lifecycle script of a dependency.
- */
-function installTarball(dir) {
-  const packed = spawnSync(
-    "npm",
-    ["pack", "--pack-destination", dir, "--ignore-scripts", "--silent"],
-    { cwd: PACKAGE, encoding: "utf8" },
-  );
-  assert.equal(packed.status, 0, `npm pack failed: ${packed.stderr}`);
-  const tarballs = readdirSync(dir).filter((entry) => entry.endsWith(".tgz"));
-  assert.deepEqual(tarballs.length, 1, `npm pack wrote ${tarballs.join(", ") || "nothing"}`);
+/** A local binary this package's devDependencies installed. */
+function binary(name) {
+  return join(PACKAGE, "node_modules", ".bin", name);
+}
 
-  const installed = spawnSync(
-    "npm",
-    [
-      "install", "--prefix", dir, join(dir, tarballs[0]),
-      "--offline", "--no-audit", "--no-fund", "--ignore-scripts", "--silent",
-    ],
-    { encoding: "utf8" },
-  );
-  assert.equal(installed.status, 0, `npm install of the packed tarball failed: ${installed.stderr}`);
+/** Runs `command` in `cwd`, bounded, and fails with what the child actually reported. */
+function succeeds(command, args, cwd, what) {
+  const run = spawnSync(command, args, { cwd, encoding: "utf8", timeout: CHILD_TIMEOUT_MS });
+  assert.equal(run.error, undefined, `${what} did not finish:\n${report(run)}`);
+  assert.equal(run.signal, null, `${what} was killed:\n${report(run)}`);
+  assert.equal(run.status, 0, `${what} failed:\n${report(run)}`);
 }
 
 /**
- * The consumer script the declarations are compiled against.
+ * The package packed into `dir`, as the tarball `npm publish` uploads.
  *
- * It is what the documentation tells a consumer to write, and every line of it is a
- * declaration this package emits: the class, the generated request type, the error
- * class and a preset builder from the two subpaths, and `using` — which is the
- * declaration the whole case exists for.
+ * `--pack-destination` keeps the tarball out of the checkout, and `--ignore-scripts`
+ * keeps the pack free of lifecycle scripts. The single `.tgz` is returned so callers
+ * can install it or hand the same artefact to a validator.
  */
-const CONSUMER = [
-  'import { Engine, type Response } from "opportune";',
-  'import { OpportuneError, businessHours, type Request } from "opportune/presets";',
-  "",
-  "const request: Request = {",
-  '  now: "2027-06-14T07:00Z",',
-  "  goal: {",
-  '    zone: "Europe/London",',
-  '    search_window: ["2027-06-13T23:00Z", "2027-06-18T23:00Z"],',
-  '    parts: [{ duration: "30m", requirement: { all: [{ person: "rich" }] } }],',
-  "  },",
-  "  rules: [businessHours()],",
-  "};",
-  "",
-  "export function book(): Response | string {",
-  "  try {",
-  "    using engine = new Engine();",
-  "    return engine.findAvailability(request);",
-  "  } catch (thrown) {",
-  "    if (thrown instanceof OpportuneError) {",
-  "      return thrown.code;",
-  "    }",
-  "    throw thrown;",
-  "  }",
-  "}",
-  "",
-].join("\n");
+function packTarball(dir) {
+  const packed = spawnSync(
+    "npm",
+    ["pack", "--pack-destination", dir, "--ignore-scripts", "--silent"],
+    { cwd: PACKAGE, encoding: "utf8", timeout: CHILD_TIMEOUT_MS },
+  );
+  assert.equal(packed.error, undefined, `npm pack did not finish:\n${report(packed)}`);
+  assert.equal(packed.signal, null, `npm pack was killed:\n${report(packed)}`);
+  assert.equal(packed.status, 0, `npm pack failed:\n${report(packed)}`);
+  const tarballs = readdirSync(dir).filter((entry) => entry.endsWith(".tgz"));
+  assert.deepEqual(tarballs.length, 1, `npm pack wrote ${tarballs.join(", ") || "nothing"}`);
+  return join(dir, tarballs[0]);
+}
 
-/** The page that states, to a consumer, which runtimes the package installs onto. */
-const WASM_DOC = join(PACKAGE, "..", "..", "..", "docs", "wasm.md");
+/**
+ * The package packed into `dir` and installed there, as a consumer receives it.
+ *
+ * `--offline` is sound because the package declares no runtime dependency.
+ * `--ignore-scripts` on both, so the install runs no lifecycle script.
+ */
+function installTarball(dir) {
+  const tarball = packTarball(dir);
+  const installed = spawnSync(
+    "npm",
+    [
+      "install",
+      "--prefix",
+      dir,
+      tarball,
+      "--offline",
+      "--no-audit",
+      "--no-fund",
+      "--ignore-scripts",
+      "--silent",
+    ],
+    { encoding: "utf8", timeout: CHILD_TIMEOUT_MS },
+  );
+  assert.equal(installed.error, undefined, `npm install did not finish:\n${report(installed)}`);
+  assert.equal(installed.signal, null, `npm install was killed:\n${report(installed)}`);
+  assert.equal(installed.status, 0, `npm install of the packed tarball failed:\n${report(installed)}`);
+}
+
+/** Compiles the consumer project in `dir` with the package's own TypeScript. */
+function typechecks(dir) {
+  // The npm-installed `tsc` shim carries a `node` shebang, so this is the same compiler
+  // whether the suite runs under Node or Bun. `process.execPath` would be Bun in the Bun
+  // lane, which is not the toolchain this compile is checking.
+  const run = spawnSync(binary("tsc"), ["-p", join(dir, "tsconfig.json")], {
+    cwd: dir,
+    encoding: "utf8",
+    timeout: CHILD_TIMEOUT_MS,
+  });
+  // A compile that never ran, was killed, or crashed, is not a consumer whose declarations
+  // compiled. Checking the status here is what keeps an empty-output failure from reading
+  // as a clean compile, and `report` keeps the status, signal and both streams together.
+  assert.equal(run.error, undefined, `tsc did not finish:\n${report(run)}`);
+  assert.equal(run.signal, null, `tsc was killed:\n${report(run)}`);
+  assert.equal(run.status, 0, `tsc failed:\n${report(run)}`);
+  return `${run.stdout ?? ""}${run.stderr ?? ""}`.trim();
+}
+
+/** The project options a consumer starts from: no DOM, no `@types` inherited. */
+function projectOptions(lib) {
+  return {
+    compilerOptions: {
+      target: "ES2024",
+      module: "nodenext",
+      moduleResolution: "nodenext",
+      lib,
+      strict: true,
+      noEmit: true,
+      skipLibCheck: false,
+      types: [],
+    },
+    files: ["consumer.ts"],
+  };
+}
 
 test("the manifest declares the runtime floors the documentation states", () => {
   assert.deepEqual(MANIFEST.engines, RUNTIMES);
 });
 
-test("the manifest marks the browser stub as the one module with side effects", () => {
-  // A bundler tree-shakes a package whose manifest declares `sideEffects: false` — the
-  // flag that makes `import { businessHours } from "opportune/presets"` reach only the
-  // builder the caller uses. The stub cannot be shaken: its whole purpose is the
-  // rejection it raises at import, and a bundler that dropped it would ship a bundle
-  // that resolves no runtime check at all. Naming it — and nothing else — is therefore
-  // the declaration that both halves hold: every other module here, the compiled glue
-  // included, is loaded lazily by the call that needs it.
-  assert.deepEqual(
-    MANIFEST.sideEffects,
-    [BROWSER],
-    "the manifest declares side effects other than the browser stub, or none at all: a bundle " +
-      "then either cannot tree-shake `opportune/presets` or drops the stub that explains the runtime",
-  );
-});
-
 test("the documentation states the runtime floors the manifest declares", () => {
-  // The sentence wraps in the page and moves as the prose is edited, so it is matched
-  // with its whitespace flattened. Its `engines` clause is what makes it the sentence
-  // promising the manifest says the same thing: the floor a consumer reads in the docs
-  // and the floor their package manager enforces are one statement split across two
-  // files, and either half can be edited without touching the other.
   const page = readFileSync(WASM_DOC, "utf8").replace(/\s+/g, " ");
   const stated = /Node (\d+) or newer, or Bun (\d+\.\d+\.\d+) or newer, as `engines` in the manifest states/.exec(
     page,
@@ -433,349 +256,497 @@ test("the documentation states the runtime floors the manifest declares", () => 
     "docs/wasm.md no longer states the Node and Bun floors as `engines` in the manifest states them",
   );
   const [, node, bun] = stated;
-  assert.equal(
-    MANIFEST.engines.node,
-    `>=${node}`,
-    `docs/wasm.md tells a consumer Node ${node} or newer, the manifest a different floor`,
-  );
-  assert.equal(
-    MANIFEST.engines.bun,
-    `>=${bun}`,
-    `docs/wasm.md tells a consumer Bun ${bun} or newer, the manifest a different floor`,
+  assert.equal(MANIFEST.engines.node, `>=${node}`);
+  assert.equal(MANIFEST.engines.bun, `>=${bun}`);
+});
+
+test("the manifest is tree-shakeable and publishes nothing it does not build", () => {
+  // `sideEffects: false` is what lets a bundler drop `opportune/presets` down to the one
+  // builder a caller imports. Every module in the package is pure: the loader instantiates
+  // on the first engine call, and the web loader does so only when the application calls
+  // `init()`. The packlist half is what `files` promises: build output, schema, README and
+  // both licence copies, and none of the source, test, harness or install trees.
+  assert.equal(MANIFEST.sideEffects, false, "the manifest no longer declares itself tree-shakeable");
+  const unpublished = ["src/", "tests/", "bin/", "scripts/", "examples/", "pkg/", "node_modules/", "integration/"];
+  assert.deepEqual(
+    FILES.filter((path) => unpublished.some((dir) => path.startsWith(dir))),
+    [],
+    "the package publishes its build output, not its sources",
   );
 });
 
-test("every export the manifest declares is in the tarball", () => {
-  const declared = Object.entries(MANIFEST.exports).flatMap(([subpath, target]) =>
-    typeof target === "string"
-      ? [[subpath, packedPath(target)]]
-      : Object.entries(target).map(([field, path]) => [`${subpath} (${field})`, packedPath(path)]),
-  );
-  assert.ok(declared.length > 0, "the manifest declares no export to check");
-  for (const [what, path] of declared) {
-    assert.ok(
-      FILES.includes(path),
-      `${what} resolves to ${path}, which the tarball does not carry. Build it with \`${BUILD}\`.`,
-    );
-  }
-});
-
-test("the tarball carries the module the loader reads, both licence copies and the README", () => {
-  // wasm-pack writes a `.gitignore` holding `*` beside its output and npm honours it,
-  // so the module reaches a consumer only because `bin/bundle-module.mjs` copies the
-  // pair into `dist/`. The names below are the loader's own path from `src/wasm.ts`
-  // seen from `dist/`. npm's always-included patterns cover `README` but not the
-  // `-MIT`/`-APACHE` licence names, so `files` is what puts the latter in the tarball.
+test("the tarball carries the module, both generated loaders, the licences and the README", () => {
   for (const path of [
     "package.json",
     "schema.json",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE",
+    "dist/pkg/opportune_wasm.js",
     "dist/pkg/opportune_wasm.cjs",
     "dist/pkg/opportune_wasm_bg.wasm",
+    "dist/wasm-node.js",
+    "dist/wasm-workerd.js",
+    "dist/wasm-web.js",
+    "dist/web.js",
   ]) {
-    assert.ok(FILES.includes(path), `the tarball does not carry ${path}`);
+    assert.ok(FILES.includes(path), `the tarball does not carry ${path}. Build it with \`${BUILD}\`.`);
   }
 });
 
-test("every export the manifest declares names both its types and its runtime file", () => {
-  for (const [subpath, target] of MAPPED) {
-    for (const condition of CONDITIONS) {
-      assert.ok(
-        typeof target[condition] === "string" && target[condition] !== "",
-        `exports[${JSON.stringify(subpath)}] declares no \`${condition}\` condition`,
-      );
-    }
-  }
+test("the tarball carries one module binary and the loaders this build generated", () => {
   assert.deepEqual(
-    [...PASSTHROUGH],
-    Object.keys(MANIFEST.exports).filter((subpath) => typeof MANIFEST.exports[subpath] === "string"),
-    "a subpath names one file directly without being declared as a passthrough this suite reads, " +
-      "so nothing proves a consumer can reach it",
+    FILES.filter((path) => path.endsWith(".wasm")),
+    ["dist/pkg/opportune_wasm_bg.wasm"],
+    "the tarball must carry exactly one WebAssembly binary",
   );
-});
-
-test("the engine-backed exports name their runtime, and every non-Node runtime gets the stub", () => {
-  // `node` and `default` have to be the same file — Node has no `browser` condition, so
-  // a `default` pointing elsewhere would be the file the runtime least able to run it
-  // loads — and every non-Node condition has to be the one stub that explains the
-  // runtime, not a per-subpath copy of that explanation. The stub also has to come
-  // before `node` in the map: a condition list is matched in declaration order, and
-  // Node always includes `node`, so a `node` key above `edge-light` would answer a
-  // request for the Edge runtime with the module that cannot run there.
-  for (const subpath of Object.keys(ENGINE)) {
-    const target = MANIFEST.exports[subpath];
-    assert.ok(target !== undefined, `the manifest declares no ${subpath}`);
-    for (const condition of NON_NODE_CONDITIONS) {
-      assert.equal(
-        target[condition],
-        BROWSER,
-        `${subpath} does not resolve to the browser stub under \`${condition}\``,
-      );
-    }
-    assert.equal(target.node, target.default, `${subpath} resolves differently on Node and by default`);
-    assert.notEqual(target.browser, target.node, `${subpath}'s browser condition loads the engine`);
-    const order = Object.keys(target);
-    for (const condition of NON_NODE_CONDITIONS) {
-      assert.ok(
-        order.indexOf(condition) < order.indexOf("node"),
-        `${subpath} declares \`node\` before \`${condition}\`, so a request for that runtime loads ` +
-          "the module that cannot run there",
-      );
-    }
-  }
-  const presets = MANIFEST.exports["./presets"];
-  assert.equal(
-    presets.browser,
-    undefined,
-    "./presets resolves to the browser stub, but a browser bundle is the one consumer it is for",
+  assert.deepEqual(
+    FILES.filter((path) => path.startsWith("dist/pkg/")).sort(),
+    [
+      "dist/pkg/opportune_wasm.cjs",
+      "dist/pkg/opportune_wasm.js",
+      "dist/pkg/opportune_wasm_bg.wasm",
+    ],
+    "`dist/pkg/` must hold the module and the two generated loaders",
   );
-});
-
-test("an installed tarball resolves every declared subpath to the module behind it", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "opportune-consumer-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-
-  installTarball(dir);
-  const resolved = resolvedByConsumer(dir);
-
-  for (const [subpath, target] of MAPPED) {
-    const name = specifier(subpath);
-    const entry = resolved.find((candidate) => candidate.specifier === name);
-    assert.ok(entry !== undefined, `${name} does not resolve for a consumer at all`);
-    const declared = packedPath(target.default);
-    assert.ok(
-      entry.resolved.endsWith(`/${declared}`),
-      `${name} resolved to ${entry.resolved}, not to the \`${declared}\` the manifest declares`,
-    );
-    assert.ok(
-      entry.names.length > 0,
-      `${name} resolved to a module exporting nothing. Build it with \`${BUILD}\`.`,
-    );
-  }
-
-  for (const [subpath, binding] of Object.entries(DOCUMENTED)) {
-    const name = specifier(subpath);
-    const entry = resolved.find((candidate) => candidate.specifier === name);
-    assert.ok(entry !== undefined, `the manifest declares no ${subpath} for a consumer to import`);
-    assert.ok(
-      entry.names.includes(binding),
-      `${name} does not export ${binding}: it resolves to ${entry.resolved}, ` +
-        `so the subpath the documentation names no longer reaches the module behind it`,
-    );
-  }
-
-  const required = requiredByConsumer(dir);
-  assert.equal(
-    required.version,
-    MANIFEST.version,
-    "the package's `VERSION` is the manifest's `version`: bump `src/constants.ts`'s constant " +
-      "when the release moves `package.json`",
-  );
-  assert.equal(
-    required.manifestVersion,
-    MANIFEST.version,
-    "`require(\"opportune/package.json\")` answers a manifest that is not this package's: the " +
-      "`./package.json` export is what a tool reads its version and metadata through",
-  );
-  assert.equal(required.rule, "window", "the CommonJS consumer builds a rule from `opportune/presets`");
-
-  // The exported schema, as the same install serves it. `dist/` is derived from this
-  // document, so a consumer validating its own request gets the same Draft 2020-12
-  // bundle rather than a hand-written copy — and the two unions a request and an
-  // answer are written against are in it by name.
-  const schema = schemaByConsumer(dir);
-  for (const [loader, shape] of Object.entries(schema)) {
-    assert.equal(
-      shape.$schema,
-      "https://json-schema.org/draft/2020-12/schema",
-      `the ${loader} loader read a schema that names another draft`,
-    );
-    assert.equal(
-      shape.request,
-      "object",
-      `\`$defs.Request\` is not a definition of the exported schema (${loader})`,
-    );
-    assert.equal(
-      shape.response,
-      "object",
-      `\`$defs.Response\` is not a definition of the exported schema (${loader})`,
-    );
-  }
-
-  // The presets subpath carries the error class and the generated types, which is what
-  // a bundle that builds a request — or answers the failure a builder raises — needs,
-  // and what it cannot get from `opportune` without resolving a module that refuses its
-  // runtime. A subpath that stopped re-exporting them would still pack, install and
-  // import, so this is the assertion that keeps a browser consumer able to type its
-  // documents and catch `OpportuneError`.
-  const presets = resolved.find((candidate) => candidate.specifier === specifier("./presets"));
   assert.ok(
-    presets?.names.includes("OpportuneError"),
-    "`opportune/presets` does not export `OpportuneError`, so a browser consumer can catch " +
-      "and type against nothing without importing the engine-backed entry",
+    !FILES.includes("dist/browser.js"),
+    "the removed browser stub is still in the tarball; the build did not clean `dist/`",
   );
-  // The same reason, for everything else a pure consumer reaches for: the constants a
-  // bundle stamps onto a provider request, and the projections a public route serves.
-  // Each is a value export, so a subpath that stopped re-exporting one still packs,
-  // installs and imports — the name is simply absent from the one module list a browser
-  // may load.
-  const pure = [
-    "VERSION",
-    "MARKER_TAGS",
-    "MARKER_EVENT_KEY",
-    "EXTENDED_PROPERTY_NAMESPACE_GUID",
-    "EXTENDED_PROPERTY_TAGS_ID",
-    "EXTENDED_PROPERTY_EVENT_KEY_ID",
-    "EXTENDED_PROPERTY_EXPAND",
-    "httpStatusForError",
-    "isKnownStatus",
-    "publicResponse",
-    "publicSlotCheck",
-    "statusPolicy",
-  ];
-  const missing = pure.filter((binding) => !presets?.names.includes(binding));
-  assert.deepEqual(
-    missing,
-    [],
-    "`opportune/presets` does not export " +
-      `${missing.join(", ")}: a bundle that may load only that subpath cannot reach it`,
-  );
+});
 
-  // The same install, resolved for each non-Node runtime: the engine subpaths have to
-  // refuse the runtime through the manifest rather than load a module that cannot work
-  // there, and the pure presets subpath has to keep loading.
-  for (const condition of NON_NODE_CONDITIONS) {
-    const under = resolvedForCondition(dir, condition);
-    for (const subpath of Object.keys(ENGINE)) {
-      const name = specifier(subpath);
-      const entry = under[name];
-      assert.equal(
-        entry?.name,
-        "OpportuneError",
-        `${name} under the ${condition} condition resolved to ${JSON.stringify(entry)}`,
-      );
-      assert.equal(entry.code, "unsupported_runtime", `${name} under the ${condition} condition`);
-      assert.match(entry.message, /Node or Bun/);
-    }
-    assert.equal(
-      under[specifier("./presets")],
-      "imported",
-      `\`opportune/presets\` must load under the ${condition} condition: it is the one a bundle can use`,
-    );
-  }
-
-  // The stub resolves for three subpaths that export three different lists, and a
-  // bundler that cannot resolve a named import fails the build with "export not found"
-  // — a symbol error that says nothing about the runtime the stub exists to explain.
-  // The map routes all three here, so the stub is only useful if it declares every
-  // name the modules it replaces declare. Read from the installed tree, because that
-  // is the copy a bundler parses.
-  const stub = readFileSync(join(dir, "node_modules", MANIFEST.name, packedPath(BROWSER)), "utf8");
-  const declared = new Set(
-    [...stub.matchAll(/export\s*\{([^}]*)\}/g)].flatMap(([, names]) =>
-      names.split(",").map((name) => name.trim().replace(/^\S+ as /, "")).filter(Boolean),
-    ),
+test("every export target the manifest declares is in the tarball", () => {
+  const declared = Object.entries(MANIFEST.exports).flatMap(([subpath, target]) =>
+    typeof target === "string"
+      ? [[subpath, target.replace(/^\.\//, "")]]
+      : Object.entries(target).map(([field, path]) => [
+          `${subpath} (${field})`,
+          path.replace(/^\.\//, ""),
+        ]),
   );
-  for (const subpath of Object.keys(ENGINE)) {
-    const name = specifier(subpath);
-    const exported = resolved.find((candidate) => candidate.specifier === name)?.names ?? [];
-    const absent = exported.filter((binding) => !declared.has(binding));
-    assert.deepEqual(
-      absent,
-      [],
-      `${name} exports ${absent.join(", ")}, which ${BROWSER} does not: a browser bundle ` +
-        "imports one of them and the build fails on the symbol instead of saying the runtime is wrong",
-    );
+  assert.ok(declared.length > 0, "the manifest declares no export to check");
+  for (const [what, path] of declared) {
+    assert.ok(FILES.includes(path), `${what} resolves to ${path}, which the tarball does not carry`);
   }
 });
 
-test("the installed declarations compile for a consumer with no disposable lib", (t) => {
-  // `Engine` is `Disposable`, and `Symbol.dispose` is declared in the `esnext.disposable`
-  // library rather than in `ES2024` — which is the lib a project starts from, and the
-  // one a consumer's `tsconfig.json` states. This package's own compile cannot catch a
-  // declaration that leans on a lib the consumer does not have: its `tsconfig.json`
-  // includes `esnext.disposable`, so the emission is green and the consumer — with
-  // `skipLibCheck: false` — is the first program to read the declaration as written.
-  // The case compiles the installed `dist/` under exactly that project, so the emitted
-  // declaration carries the `esnext.disposable` reference that makes `using` compile.
+test("publint accepts the packed manifest", () => {
+  succeeds(binary("publint"), ["--strict"], PACKAGE, "publint");
+});
+
+test("arethetypeswrong accepts every entry point's declarations", (t) => {
+  // The tarball is packed into a temporary directory rather than the checkout, and the
+  // validator is handed that `.tgz` directly: `--pack .` would write the tarball beside
+  // the manifest and invoke `npm pack` without `--ignore-scripts`. The declared entry
+  // points are derived from the manifest, minus the `.wasm` filename that appears inside
+  // the web loader's guidance text and is not a JS entry point. The `cjs-resolves-to-esm`
+  // rule is ignored on purpose — this package supports Node 24+ `require(esm)`, which is
+  // proved by the CommonJS consumer case below.
+  const dir = mkdtempSync(join(tmpdir(), "opportune-attw-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const tarball = packTarball(dir);
+  const entrypoints = Object.keys(MANIFEST.exports).filter((subpath) => !subpath.endsWith(".wasm"));
+  assert.notDeepEqual(entrypoints, [], "the manifest declares no JS entry point to check");
+  succeeds(
+    binary("attw"),
+    [
+      tarball,
+      "--profile",
+      "node16",
+      "--entrypoints",
+      ...entrypoints,
+      "--ignore-rules",
+      "cjs-resolves-to-esm",
+    ],
+    PACKAGE,
+    "attw",
+  );
+});
+
+test("the installed declarations compile in a consumer with no DOM lib", (t) => {
+  // `Engine` is `Disposable`, and `Symbol.dispose` lives in `esnext.disposable` rather
+  // than in `ES2024`. The package's own compile includes that lib, so a declaration that
+  // leaned on it without emitting the reference directive still compiles here and fails
+  // only in a consumer's project — which this case is.
   const dir = mkdtempSync(join(tmpdir(), "opportune-declarations-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   installTarball(dir);
 
-  writeFileSync(join(dir, "consumer.ts"), CONSUMER);
+  writeFileSync(
+    join(dir, "consumer.ts"),
+    [
+      'import { Engine, type Response } from "opportune";',
+      'import { OpportuneError, businessHours, type Request } from "opportune/presets";',
+      "",
+      "const request: Request = {",
+      '  now: "2027-06-14T07:00Z",',
+      "  goal: {",
+      '    zone: "Europe/London",',
+      '    search_window: ["2027-06-13T23:00Z", "2027-06-18T23:00Z"],',
+      '    parts: [{ duration: "30m", requirement: { all: [{ person: "rich" }] } }],',
+      "  },",
+      "  rules: [businessHours()],",
+      "};",
+      "",
+      "export function book(): Response | string {",
+      "  try {",
+      "    using engine = new Engine();",
+      "    return engine.findAvailability(request);",
+      "  } catch (thrown) {",
+      "    if (thrown instanceof OpportuneError) {",
+      "      return thrown.code;",
+      "    }",
+      "    throw thrown;",
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+  );
   writeFileSync(
     join(dir, "tsconfig.json"),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2024",
-          module: "nodenext",
-          moduleResolution: "nodenext",
-          lib: ["ES2024"],
-          strict: true,
-          skipLibCheck: false,
-          noEmit: true,
-        },
-        files: ["consumer.ts"],
-      },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify(projectOptions(["ES2024"]), null, 2)}\n`,
   );
 
-  // The project is read the way the compiler reads a consumer's: the tsconfig on disk,
-  // resolved from the directory the package was installed into. The file name travels
-  // with it because the compiler resolves the project's `typeRoots` — and every option
-  // that defaults relative to the project rather than the process — from that path: a
-  // program built from these options alone looks for `@types` beside the current
-  // working directory, which here is this package's, whose own `@types/node` supplies
-  // `Symbol.dispose` and hides the very thing the case checks for.
-  const configFile = join(dir, "tsconfig.json");
-  const config = TS.readConfigFile(configFile, TS.sys.readFile);
-  assert.equal(config.error, undefined, "the fixture tsconfig.json does not parse");
-  const project = TS.parseJsonConfigFileContent(config.config, TS.sys, dir, undefined, configFile);
-  assert.deepEqual(
-    project.errors.map((error) => TS.flattenDiagnosticMessageText(error.messageText, " ")),
-    [],
-    "the fixture tsconfig.json is not a project the compiler accepts",
-  );
-
-  const program = TS.createProgram(project.fileNames, project.options);
-  // A bare project, which is the one the missing directive breaks. `@types/node` —
-  // inherited from this repository's tooling, or installed by the consumer's own
-  // application — declares `Symbol.dispose` itself, so a program that picked it up would
-  // compile whether or not the declaration carries the reference. The case is only
-  // evidence while the program is the project the lib alone describes.
-  const inherited = program.getSourceFiles()
-    .map((file) => file.fileName)
-    .filter((name) => name.includes("/node_modules/@types/"));
-  assert.deepEqual(
-    inherited,
-    [],
-    "the fixture project inherited a type package, whose own libs would answer for the " +
-      "declaration this case exists to check",
-  );
-
-  const diagnostics = TS.getPreEmitDiagnostics(program).map((diagnostic) => {
-    const where = diagnostic.file === undefined
-      ? ""
-      : `${diagnostic.file.fileName}:${String(
-          diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0).line + 1,
-        )}: `;
-    return `${where}${TS.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`;
-  });
-  assert.deepEqual(
+  const diagnostics = typechecks(dir);
+  assert.equal(
     diagnostics,
-    [],
-    "the packed declarations do not compile for a consumer whose lib is `ES2024` with " +
-      "`skipLibCheck: false`: the reference directive `dist/engine.d.ts` needs is missing",
+    "",
+    "the packed root declarations do not compile for a consumer whose lib is `ES2024` with " +
+      "`skipLibCheck: false`",
   );
 });
 
-test("the tarball carries no source, test or tooling tree", () => {
-  const unpublished = ["src/", "tests/", "bin/", "scripts/", "examples/", "pkg/", "node_modules/"];
-  const leaked = FILES.filter((path) => unpublished.some((dir) => path.startsWith(dir)));
-  assert.deepEqual(leaked, [], "the package publishes its build output, not its sources");
+test("`opportune/web` compiles for a Web consumer with typed init and initSync", (t) => {
+  /**
+   * The web entry names `Response` and `URL`, which live in the DOM lib, and it accepts
+   * a compiled module, which it has to do without naming the `WebAssembly` namespace
+   * (see the Node case below). The subpath exists so those names stay out of the root
+   * declarations; a Web consumer is the program that has them, and this is the compile
+   * that proves the subpath exports the two initialisers with their input types.
+   *
+   * `declare const compiled` is the platform's own type, not a cast: a cast would answer
+   * `{}` for any value, and would prove nothing about a real `WebAssembly.Module` being
+   * accepted by the published union.
+   */
+  const dir = mkdtempSync(join(tmpdir(), "opportune-web-declarations-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  installTarball(dir);
+
+  writeFileSync(
+    join(dir, "consumer.ts"),
+    [
+      'import init, { initSync, type InitInput, type SyncInitInput } from "opportune/web";',
+      "",
+      "declare const compiled: WebAssembly.Module;",
+      "const input: InitInput = new URL(\"/opportune_wasm_bg.wasm\", globalThis.location.href);",
+      "const module: SyncInitInput = compiled;",
+      "",
+      "export async function start(): Promise<void> {",
+      "  await init(input);",
+      "  initSync({ module });",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    `${JSON.stringify(projectOptions(["ES2024", "DOM"]), null, 2)}\n`,
+  );
+
+  const diagnostics = typechecks(dir);
+  assert.equal(
+    diagnostics,
+    "",
+    "`opportune/web` does not compile for a Web consumer with `lib: [\"ES2024\", \"DOM\"]`",
+  );
+});
+
+test("`opportune/web` compiles for a Web Worker consumer", (t) => {
+  /**
+   * A module Web Worker is the other program the subpath exists for: `WebWorker` instead
+   * of `DOM`, and no `@types` at all. A `Response` (what `fetch` answers with) and the
+   * platform's `WebAssembly.Module` both have to be assignable there, so a declaration
+   * that named only the DOM spellings of those globals would pass the case above and
+   * fail here.
+   */
+  const dir = mkdtempSync(join(tmpdir(), "opportune-web-worker-declarations-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  installTarball(dir);
+
+  writeFileSync(
+    join(dir, "consumer.ts"),
+    [
+      'import init, { initSync, type InitInput, type SyncInitInput } from "opportune/web";',
+      "",
+      "declare const compiled: WebAssembly.Module;",
+      "declare const response: Response;",
+      "const module: SyncInitInput = compiled;",
+      "const input: InitInput = response;",
+      "",
+      "export async function start(): Promise<void> {",
+      "  await init(input);",
+      "  initSync({ module });",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    `${JSON.stringify(projectOptions(["ES2024", "WebWorker"]), null, 2)}\n`,
+  );
+
+  const diagnostics = typechecks(dir);
+  assert.equal(
+    diagnostics,
+    "",
+    "`opportune/web` does not compile for a Web Worker consumer with " +
+      "`lib: [\"ES2024\", \"WebWorker\"]`",
+  );
+});
+
+test("`opportune/web` compiles for a Node consumer with no DOM or WebWorker lib", (t) => {
+  /**
+   * An isomorphic module imports the initialiser on both sides: `init()` is a no-op on
+   * Node, so one file can call it unconditionally and the server's project — `@types/node`
+   * and `lib: ["ES2024"]`, the same lib the root declarations compile under — has to be
+   * able to read the declaration. Only the `WebAssembly` namespace is missing there, so
+   * this is the compile that keeps the published union from requiring a lib the server
+   * does not have, while the bytes a Node caller actually passes stay assignable.
+   */
+  const dir = mkdtempSync(join(tmpdir(), "opportune-web-node-declarations-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  installTarball(dir);
+
+  writeFileSync(
+    join(dir, "consumer.ts"),
+    [
+      'import { readFileSync } from "node:fs";',
+      "",
+      'import init, { initSync, type InitInput, type SyncInitInput } from "opportune/web";',
+      "",
+      "const bytes: SyncInitInput = readFileSync(\"/opportune_wasm_bg.wasm\");",
+      "const asset: InitInput = new URL(\"https://example.test/opportune_wasm_bg.wasm\");",
+      "const promised: InitInput = Promise.resolve(asset);",
+      "",
+      "export async function start(): Promise<void> {",
+      "  await init(promised);",
+      "  initSync({ module: bytes });",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  // The package's own pinned `@types/node`, so the consumer needs no install and the
+  // compile is the same one the package's `tsconfig.check.json` makes.
+  const options = projectOptions(["ES2024"]);
+  options.compilerOptions.types = ["node"];
+  options.compilerOptions.typeRoots = [join(PACKAGE, "node_modules", "@types")];
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    `${JSON.stringify(options, null, 2)}\n`,
+  );
+
+  const diagnostics = typechecks(dir);
+  assert.equal(
+    diagnostics,
+    "",
+    "`opportune/web` does not compile for a Node consumer whose lib is `ES2024` with " +
+      "`@types/node` and `skipLibCheck: false`",
+  );
+});
+
+test("a CommonJS consumer builds an engine synchronously and reads the schema", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "opportune-cjs-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  installTarball(dir);
+
+  const consumer = join(dir, "consumer.cjs");
+  writeFileSync(
+    consumer,
+    [
+      `const pkg = require(${JSON.stringify(MANIFEST.name)});`,
+      `const { readFileSync } = require("node:fs");`,
+      `const presets = require(${JSON.stringify(`${MANIFEST.name}/presets`)});`,
+      `const graph = require(${JSON.stringify(`${MANIFEST.name}/adapters/graph`)});`,
+      `const google = require(${JSON.stringify(`${MANIFEST.name}/adapters/google`)});`,
+      `const web = require(${JSON.stringify(`${MANIFEST.name}/web`)});`,
+      `const manifest = require(${JSON.stringify(`${MANIFEST.name}/package.json`)});`,
+      `const schema = require(${JSON.stringify(`${MANIFEST.name}/schema.json`)});`,
+      // The eighth export, and the one the browser documentation tells every bundler
+      // consumer to import: `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"`
+      // resolves through this same entry. Resolved, not required — a consumer's bundler
+      // turns it into a URL, and `require()` of a binary would throw for the wrong reason.
+      `const wasmAsset = require.resolve(${JSON.stringify(`${MANIFEST.name}/opportune_wasm_bg.wasm`)});`,
+      "const engine = new pkg.Engine();",
+      "const tzdb = engine.tzdbVersion;",
+      "const limit = pkg.defaultLimits().max_search_window_days;",
+      "engine.free();",
+      "console.log(JSON.stringify({",
+      "  version: pkg.VERSION,",
+      "  rule: presets.businessHours().kind,",
+      "  graphMarker: graph.MARKER_TAGS,",
+      "  googleMarker: google.MARKER_TAGS,",
+      "  graphExpand: graph.EXTENDED_PROPERTY_EXPAND,",
+      "  webInit: typeof web.init,",
+      "  webDefault: typeof web.default,",
+      "  manifestVersion: manifest.version,",
+      "  schema: schema.$schema,",
+      '  wasmMagic: readFileSync(wasmAsset).subarray(0, 4).toString("latin1"),',
+      "  tzdb,",
+      "  limit,",
+      "}));",
+    ].join("\n"),
+  );
+  const run = spawnSync(process.execPath, [consumer], {
+    cwd: dir,
+    encoding: "utf8",
+    timeout: CHILD_TIMEOUT_MS,
+  });
+  assert.equal(run.error, undefined, `the CommonJS consumer did not finish:\n${report(run)}`);
+  assert.equal(run.signal, null, `the CommonJS consumer was killed:\n${report(run)}`);
+  assert.equal(run.status, 0, `require() of the installed package failed:\n${report(run)}`);
+  const required = JSON.parse(run.stdout);
+
+  assert.equal(required.version, MANIFEST.version);
+  assert.equal(required.manifestVersion, MANIFEST.version);
+  assert.equal(required.rule, "window");
+  // Every subpath waived under `cjs-resolves-to-esm` is genuinely reached by `require()`:
+  // the adapters' constants and the web entry's initialisers are read from the CommonJS
+  // namespace, so the waiver rests on a working `require(esm)` rather than an untested
+  // claim about what a resolver would do.
+  assert.equal(required.graphMarker, "opportune.tags");
+  assert.equal(required.googleMarker, "opportune.tags");
+  assert.match(required.graphExpand, /^singleValueExtendedProperties\(\$filter=/);
+  assert.equal(required.webInit, "function");
+  assert.equal(required.webDefault, "function");
+  assert.equal(required.schema, "https://json-schema.org/draft/2020-12/schema");
+  // An unmapped or mistyped asset subpath fails a consumer's build with
+  // `ERR_PACKAGE_PATH_NOT_EXPORTED` while every test here stays green, because the
+  // tarball-content cases check the file, not the entry that reaches it. Reading the
+  // WebAssembly magic pins both ends: the documented entry resolves, and it resolves to
+  // the module binary rather than to something a bundler would serve as a URL and hand
+  // to `init(...)` as a document that is not WebAssembly.
+  assert.equal(required.wasmMagic, WASM_MAGIC, "the asset subpath did not resolve to the module binary");
+  // The same script built an engine, read the module's own time zone database version
+  // and released it, all without a tick: a build whose glue needed the asynchronous
+  // initialiser would fail here rather than in a consumer's server.
+  assert.match(required.tzdb, /^\d{4}[a-z]$/, "the CommonJS consumer read a time zone database version");
+  assert.equal(required.limit, 92, "the CommonJS consumer read the engine's default limits");
+});
+
+test("an ESM consumer imports every declared subpath and resolves each through import.meta.resolve", (t) => {
+  // The CommonJS case above proves `require(esm)`; this is the other half a consumer has:
+  // a native `import` through the installed package's `exports` map, the JSON entries read
+  // with their import attributes, and `import.meta.resolve` for every declared subpath —
+  // the asset included, resolved to the module binary itself rather than to something a
+  // bundler would hand `init()` as a document that is not WebAssembly. Both lists are
+  // derived from the manifest, so a subpath added to `exports` reaches this case without
+  // anyone remembering to name it here.
+  const dir = mkdtempSync(join(tmpdir(), "opportune-esm-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  installTarball(dir);
+
+  const consumer = join(dir, "consumer.mjs");
+  writeFileSync(
+    consumer,
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFileSync } from "node:fs";',
+      'import { fileURLToPath } from "node:url";',
+      "",
+      `const name = ${JSON.stringify(MANIFEST.name)};`,
+      `const version = ${JSON.stringify(MANIFEST.version)};`,
+      `const magic = ${JSON.stringify(WASM_MAGIC)};`,
+      `const declared = ${JSON.stringify(EXPORTS)};`,
+      `const json = ${JSON.stringify(JSON_EXPORTS.map((entry) => entry.specifier))};`,
+      `const surface = ${JSON.stringify(Object.entries(SURFACE))};`,
+      "",
+      "// Every executable subpath is imported, and the binding a consumer reads is there.",
+      "for (const [subpath, bindings] of surface) {",
+      '  const specifier = subpath === "." ? name : `${name}/${subpath.slice(2)}`;',
+      "  const module = await import(specifier);",
+      "  for (const binding of bindings) {",
+      "    assert.ok(binding in module, `${specifier} exports no ${binding}`);",
+      "  }",
+      "}",
+      "",
+      "// Every declared subpath resolves, and to the file the manifest names.",
+      "for (const { specifier, target } of declared) {",
+      "  const resolved = import.meta.resolve(specifier);",
+      '  assert.ok(resolved.startsWith("file:"), `${specifier} resolved to ${resolved}`);',
+      "  const path = fileURLToPath(resolved);",
+      '  assert.ok(path.endsWith("/" + target), `${specifier} resolved to ${path}, not the declared ${target}`);',
+      '  assert.ok(readFileSync(path).length > 0, `${specifier} resolved to an empty file`);',
+      "}",
+      "",
+      "// The JSON subpaths a consumer validates or reads metadata through, with the import",
+      "// attribute Node and Bun both require for a JSON module.",
+      "const documents = {};",
+      "for (const specifier of json) {",
+      '  documents[specifier] = (await import(specifier, { with: { type: "json" } })).default;',
+      "}",
+      "",
+      "const root = await import(name);",
+      'const web = await import(name + "/web");',
+      'const presets = await import(name + "/presets");',
+      'const graph = await import(name + "/adapters/graph");',
+      'const google = await import(name + "/adapters/google");',
+      "",
+      "assert.equal(root.VERSION, version);",
+      'assert.equal(web.default, web.init, "opportune/web\'s default export is init");',
+      'assert.equal(presets.businessHours().kind, "window");',
+      'assert.deepEqual(presets.person("rich"), { person: "rich" });',
+      'assert.equal(graph.calendarViewToBlocks({ value: [] }, "UTC").status, "available");',
+      'assert.deepEqual(google.eventsListToBlocks({ items: [] }, "UTC"), {',
+      '  status: "available",',
+      "  blocks: [],",
+      "  diagnostics: [],",
+      "});",
+      "",
+      "// The engine really runs through the ESM entry: the module the Node loader requires",
+      "// lazily is the same one the CJS consumer built above.",
+      "const engine = new root.Engine();",
+      "try {",
+      "  assert.match(engine.tzdbVersion, /^\\d{4}[a-z]$/);",
+      "  assert.equal(root.defaultLimits().max_search_window_days, 92);",
+      "} finally {",
+      "  engine.free();",
+      "}",
+      "",
+      'const manifest = documents[name + "/package.json"];',
+      'const schema = documents[name + "/schema.json"];',
+      "assert.equal(manifest.version, version);",
+      'assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");',
+      'assert.ok(schema.$defs?.Request !== undefined, "the schema carries the Request definition");',
+      "",
+      'const wasm = fileURLToPath(import.meta.resolve(name + "/opportune_wasm_bg.wasm"));',
+      'assert.equal(readFileSync(wasm).subarray(0, magic.length).toString("latin1"), magic);',
+      "",
+      "console.log(JSON.stringify({",
+      "  subpaths: declared.length,",
+      "  executable: surface.length,",
+      "  json: json.length,",
+      '  runtime: process.versions.bun ? "bun" : "node",',
+      "}));",
+    ].join("\n"),
+  );
+
+  const run = spawnSync(process.execPath, [consumer], {
+    cwd: dir,
+    encoding: "utf8",
+    timeout: CHILD_TIMEOUT_MS,
+  });
+  assert.equal(run.error, undefined, `the ESM consumer did not finish:\n${report(run)}`);
+  assert.equal(run.signal, null, `the ESM consumer was killed:\n${report(run)}`);
+  assert.equal(run.status, 0, `import() of the installed package failed:\n${report(run)}`);
+  const imported = JSON.parse(run.stdout);
+  assert.equal(imported.subpaths, EXPORTS.length, "the consumer resolved fewer subpaths than the manifest declares");
+  assert.equal(imported.executable, EXECUTABLE_EXPORTS.length);
+  assert.equal(imported.json, JSON_EXPORTS.length);
+  // The spawned consumer is whichever runtime runs the suite, so the Bun lane proves this
+  // case on Bun's loader rather than silently re-running it on Node.
+  assert.equal(
+    imported.runtime,
+    process.versions.bun ? "bun" : "node",
+    "the ESM consumer did not execute under the runtime that drove the suite",
+  );
 });

@@ -720,25 +720,27 @@ on every platform, `wasm32` included.
 | `google` | on | `google::events_list_to_blocks`, `google::free_busy_to_blocks` |
 | `windows-zones` | on | Resolving Windows zone names through CLDR data |
 | `bundled-tzdb` | on | The `json` entry points that resolve zones against the database compiled into the binary; without it the `*_with_db` variants remain |
-| `json` | off | The JSON envelopes and entry points a binding calls — `json::calendar_view_to_blocks`, `json::get_schedule_to_blocks`, `json::working_hours_to_rule`, `json::events_list_to_blocks`, and their `*_with_db` twins |
+| `json` | off | The JSON envelopes and entry points a binding calls — `json::calendar_view_to_blocks`, `json::get_schedule_to_blocks`, `json::working_hours_to_rule`, `json::events_list_to_blocks`, `json::free_busy_to_blocks`, and the `*_with_db` twins of the zone-resolving four |
 | `schema` | off | The adapter half of the JSON Schema bundle |
 
 ### The binding entry points
 
-With the `json` feature on, each conversion exists twice: the short name uses
+With the `json` feature on, each zone-resolving conversion exists twice: the short name uses
 the compiled-in database (`bundled-tzdb`) and the `*_with_db` name takes a
 `&TimeZoneDatabase`, exactly as the core's engine builder does:
 
 ```rust
-pub fn calendar_view_to_blocks(db: &TimeZoneDatabase, payload_json: &str, participant_zone: &str, category_map_json: Option<&str>) -> Result<String, JsonError>;
-pub fn get_schedule_to_blocks(db: &TimeZoneDatabase, payload_json: &str) -> Result<String, JsonError>;
-pub fn working_hours_to_rule(db: &TimeZoneDatabase, payload_json: &str, rule_id: &str) -> Result<String, JsonError>;
-pub fn events_list_to_blocks(db: &TimeZoneDatabase, payload_json: &str, participant_zone: &str) -> Result<String, JsonError>;
+pub fn calendar_view_to_blocks(payload_json: &str, participant_zone: &str, category_map_json: Option<&str>) -> Result<String, JsonError>;
+pub fn get_schedule_to_blocks(payload_json: &str) -> Result<String, JsonError>;
+pub fn working_hours_to_rule(payload_json: &str, rule_id: &str) -> Result<String, JsonError>;
+pub fn events_list_to_blocks(payload_json: &str, participant_zone: &str) -> Result<String, JsonError>;
+pub fn free_busy_to_blocks(payload_json: &str) -> Result<String, JsonError>;
 ```
 
 The `*_with_db` forms are the same functions with that first argument supplied
 by the caller; the Python, TypeScript and WASM bindings call them with their own
-engine's database.
+engine's database. `free_busy_to_blocks` is the exception: free/busy ranges carry
+no zone names, so it needs no time zone database and has no `*_with_db` twin.
 
 ### The outcome contract
 

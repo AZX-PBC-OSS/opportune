@@ -18,8 +18,9 @@
  *
  * Two things the package promises about its own module graph are here too, because
  * both are observable only as a rejection a caller can catch: the values that would
- * otherwise be rewritten silently on their way into JSON, and the runtime the
- * `browser` condition refuses. The `opportune/presets` subpath is the mirror image —
+ * otherwise be rewritten silently on their way into JSON, and the surface the
+ * browser/Web Worker entry exposes so a caller can initialise the module. The
+ * `opportune/presets` subpath is the mirror image —
  * it must load no WebAssembly at all, which `module_load_failure.test.mjs` proves from
  * a package whose module is absent.
  *
@@ -78,7 +79,7 @@ import {
 } from "../dist/adapters/graph.js";
 import { eventsListToBlocks, freeBusyToBlocks } from "../dist/adapters/google.js";
 import { OpportuneError as PresetError, businessHours as presetBusinessHours } from "../dist/presets-entry.js";
-import { wasmModule } from "../dist/wasm.js";
+import { wasmModule } from "#wasm";
 import { binding } from "../dist/engine.js";
 
 /** An empty Graph `calendarView` — the conversion reads every payload as a record. */
@@ -622,6 +623,57 @@ test("a non-finite number is a rejection, never the `null` JSON writes", () => {
   );
 });
 
+test("limits JSON would write as `{}` are refused, not answered with the defaults", () => {
+  // Every field of a limits document is optional, so `{}` is a document the wire reads
+  // as "all defaults". A `Map`, a `Set`, an instance of a class and an object whose
+  // fields are on its prototype carry no own enumerable member, so `JSON.stringify`
+  // writes exactly that — and the engine would run with none of the limits the caller
+  // asked for. The plain object is the control: with the same field on the document
+  // itself, the one participant over the bound *is* refused.
+  const request = {
+    ...REQUEST,
+    goal: singleGoal("30m", { all: [person("rich"), person("ana")] }, {
+      zone: "Europe/London",
+      searchWindow: ["2027-06-13T23:00Z", "2027-06-18T23:00Z"],
+    }),
+    participants: [
+      { id: "rich", zone: "Europe/London", calendar: [] },
+      { id: "ana", zone: "Europe/London", calendar: [] },
+    ],
+  };
+  using bounded = new Engine({ max_participants: 1 });
+  const limited = thrown(() => bounded.findAvailability(request));
+  assert.ok(limited instanceof OpportuneError, `the bounded engine answered: ${limited?.message}`);
+  assert.equal(limited.code, "invalid_request");
+  assert.ok(
+    limited.errors.some((finding) => finding.code === "participants_limit"),
+    `the plain limits document did not bound the request: ${JSON.stringify(limited.errors)}`,
+  );
+
+  const refused = [
+    ["a Map", new Map([["max_participants", 1]]), "map"],
+    ["a Set", new Set(["max_participants"]), "set"],
+    ["an instance of a class", new (class Limits {})(), "limits"],
+    ["a prototype-carried field", Object.create({ max_participants: 1 }), "object"],
+  ];
+  for (const [what, limits, named] of refused) {
+    // `invalid_limits` is the code `Engine` documents, and it is the existing
+    // configuration translation — not a new one — that turns the shape refusal into it.
+    const error = assertRejection(
+      () => new Engine(limits),
+      "invalid_limits",
+      `not a value of type ${named}`,
+    );
+    assert.equal(error.cause?.code, "invalid_type", what);
+  }
+
+  // The two "no argument" spellings keep meaning the engine's own defaults.
+  using fromNull = new Engine(null);
+  using fromUndefined = new Engine(undefined);
+  assert.match(fromNull.tzdbVersion, /^\d{4}[a-z]$/);
+  assert.match(fromUndefined.tzdbVersion, /^\d{4}[a-z]$/);
+});
+
 test("an offer the accessors cannot read is a rejection, not a TypeError", () => {
   // A lookup that missed, an offer read from a queue and never parsed: the accessors
   // are how an application reads the engine's answer, so a shape they cannot read has
@@ -741,37 +793,18 @@ test("an Engine handed to an adapter where a document belongs is a rejection", (
   }
 });
 
-test("the browser entry refuses the runtime it was bundled for", async () => {
-  // A browser bundle resolves the manifest's `browser` condition, which is this module
-  // for `.`, `./adapters/graph` and `./adapters/google`. It has to fail at the import:
-  // the alternative is a bundle that ships, runs, and throws a loader error several
-  // frames away once a user's request reaches the engine — or worse, one whose Edge
-  // runtime reports the missing module as an ordinary 500 with no explanation.
-  const error = await import("../dist/browser.js").then(
-    () => assert.fail("the browser entry imported cleanly"),
-    (thrown) => thrown,
-  );
-  assert.equal(error?.name, "OpportuneError", `the browser entry threw: ${error?.stack ?? error}`);
-  assert.equal(error.code, "unsupported_runtime");
-  assert.equal(error.path, null);
-  assert.deepEqual(error.errors, []);
-  assert.match(error.message, /Node or Bun/);
-  assert.match(error.message, /opportune\/presets/, "the message says what a bundle can use instead");
-  // A Next.js caller is the one this message is most often read for, and the setting
-  // that keeps the engine on Node is not the one that reads as "just run it on Node":
-  // `runtime = "nodejs"` on a route leaves the package in the bundle, which is the
-  // failure this message exists to prevent. A message naming it as an alternative is
-  // the misleading guidance the wording was corrected from, so both halves are pinned.
-  assert.match(
-    error.message,
-    /serverExternalPackages/,
-    "the message does not name the Next.js setting that keeps the engine out of the bundle",
-  );
-  assert.match(
-    error.message,
-    /runtime = "nodejs"` alone/,
-    "the message does not say that `export const runtime = \"nodejs\"` on its own leaves the engine bundled",
-  );
+test("the browser entry exposes the explicit initialisers instead of a stub", async () => {
+  // A browser or Web Worker bundle resolves the manifest's `browser`/`worker`
+  // condition to the shared public entry, whose `#wasm` loader is `wasm-web.js`. What
+  // the entry exposes is the one step a caller has to take: `init()` and `initSync()`,
+  // with `init` as the default. The loader's own pre-init rejection and retry state
+  // machine are exercised by `web_loader.test.mjs`, which owns that module state in its
+  // own process: under Bun every test file shares one module registry, so calling the
+  // in-process web loader here would race that suite's initialisation.
+  const web = await import("../dist/web.js");
+  assert.equal(typeof web.init, "function", "opportune/web exports init");
+  assert.equal(typeof web.initSync, "function", "opportune/web exports initSync");
+  assert.equal(web.default, web.init, "opportune/web's default export is init");
 });
 
 test("the error class is one class across the entry and the pure subpath", () => {
@@ -820,7 +853,8 @@ test("the constants the package states without the module are the module's own v
   // only the compiled module knows. These are the comparisons that keep the copies
   // honest, in the suite both runtimes run: every marker and extended-property string
   // the adapters hand a caller is pinned here, not only the two the package entry
-  // re-exports.
+  // re-exports. `#wasm` is the loader the package itself resolves, so this compares
+  // the constants against the module the engine these tests call actually loaded.
   const wasm = wasmModule();
   assert.equal(VERSION, wasm.version());
   assert.equal(MARKER_TAGS, wasm.marker_tags());

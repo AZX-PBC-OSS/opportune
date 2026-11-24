@@ -1,0 +1,21 @@
+{
+  // The Worker this harness runs. Tests execute inside the runtime this entry names;
+  // there is no assets binding, no route and no remote binding, because the whole run is
+  // one local workerd instance.
+  "name": "opportune-workerd-integration",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-18",
+  // A Worker has no filesystem, so a `.wasm` reaches it only as a module the deployment
+  // bundle compiled. A real Wrangler deployment needs this rule to compile the package's
+  // static `.wasm` import; `@cloudflare/vitest-plugin` compiles `.wasm` automatically
+  // during tests, so the rule mirrors the deployment rather than carrying the test run.
+  // `fallthrough` only keeps a later rule of the same type eligible; it is inert here
+  // because `CompiledWasm` is the only rule, and it has no part in loading the module.
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["**/*.wasm"],
+      "fallthrough": true
+    }
+  ]
+}

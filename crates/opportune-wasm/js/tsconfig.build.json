@@ -4,7 +4,17 @@
     "noEmit": false,
     "declaration": true,
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    // `#wasm` resolves through `package.json#imports` at runtime, whose entry names a
+    // file in `dist/` that does not exist until this build has run. The typechecker
+    // gets the source instead, the same way `tsconfig.check.json` does — and only here,
+    // because Bun reads the base `tsconfig.json` as a runtime resolution map. `#wasm-glue`
+    // is the same situation for the generated ES module the Worker loader initialises:
+    // only a wasm build writes it, so the typechecker reads its declaration file.
+    "paths": {
+      "#wasm": ["./src/wasm-node.ts"],
+      "#wasm-glue": ["./src/wasm-glue.d.ts"]
+    }
   },
   "include": ["src"]
 }

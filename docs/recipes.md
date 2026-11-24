@@ -3011,8 +3011,8 @@ console.log(offers.length);
 Both adapter submodules accept the payload as JSON text or as a parsed object;
 the options object is the third argument for `calendarViewToBlocks` and
 `eventsListToBlocks`, and the second for the batch conversions. The signatures,
-the browser/Edge limits and the `opportune/presets` subpath are in
-[WASM and TypeScript](wasm.md#graph-and-google-adapters).
+the browser, module Web Worker, and adapter runtime limits and the `opportune/presets`
+subpath are in [WASM and TypeScript](wasm.md#graph-and-google-adapters).
 
 ## Production blueprints
 

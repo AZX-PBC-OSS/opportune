@@ -136,6 +136,9 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: build
+          # Pinned like `wasm-pack` in ci.yml: this tool decides how the tagged
+          # sources are compiled and what metadata the wheel carries, so a `latest`
+          # bump would move published bytes with no diff here. Bump it deliberately.
           maturin-version: v1.16.0
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
@@ -159,9 +162,9 @@ jobs:
         include:
           - os: macos-15-intel
             target: x86_64
-          - os: macos-latest
+          - os: macos-15
             target: aarch64
-          - os: windows-latest
+          - os: windows-2025
             target: x64
           - os: windows-11-arm
             target: aarch64
@@ -210,6 +213,68 @@ jobs:
           name: sdist
           path: dist
 
+  build-npm:
+    # The npm package is built, tested and packed here, in a job that holds no OIDC
+    # identity and performs no publish, so the publishing lane below offers an artefact
+    # instead of producing one. `make test-wasm` is the target CI's wasm lane runs and the
+    # one this workflow ran in-line before: one `wasm-pack` release build, `npm ci` from
+    # the committed lockfile, `tsc`, the gzipped size budget, `node --test` and the
+    # TypeScript snippet gate. The tarball is packed once, from the `dist/` that suite
+    # answered from, and published from that file — never re-packed.
+    name: Build and test the npm package the release publishes
+    needs: [version-check, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install wasm-pack
+        # The same pin ci.yml's wasm lane carries, for the same reason: this tool's
+        # release decides which binaryen optimises the module, so it decides the bytes of
+        # the tarball the registry receives. Bump it deliberately. See the comment on the
+        # step in ci.yml's `test-wasm`.
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: wasm-pack@0.15.1
+
+      - name: Build, size-check and test the package
+        # A fresh checkout has no `node_modules`, so `npm ci` runs first from the
+        # committed lockfile as the `wasm` target's prerequisite; then the release build,
+        # `npm run build`, the gzipped size budget, `node --test` and the snippet gate.
+        run: make test-wasm
+
+      - name: Pack the tarball the release publishes
+        # The release tarball is packed here and nowhere else in this workflow: packs used
+        # by the suite's consumer fixtures stay in their temporary directories and are
+        # never uploaded, so there is one release artefact to download and one set of bytes
+        # to attest. `--ignore-scripts` keeps a future lifecycle hook from running at pack
+        # time in the job that produces the release bytes. Packing into `runner.temp`
+        # leaves the checkout's `dist/` exactly as the suite read it.
+        run: |
+          mkdir -p "${RUNNER_TEMP}/npm-publish"
+          npm pack --pack-destination "${RUNNER_TEMP}/npm-publish" --ignore-scripts
+        working-directory: crates/opportune-wasm/js
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          # Deliberately not `npm-package-tarball`, the name ci.yml's `test-wasm` gives
+          # the tarball its runtime lanes execute: that artifact is produced by a
+          # different workflow and consumed by jobs in it, and this one is produced and
+          # consumed by this release run alone.
+          name: npm-publish-tarball
+          path: ${{ runner.temp }}/npm-publish/*.tgz
+          if-no-files-found: error
+
   publish-pypi:
     name: Publish to PyPI
     needs: [wheels-linux, wheels-other, sdist]
@@ -251,19 +316,19 @@ jobs:
           skip-existing: true
 
   publish-npm:
-    # The npm package is built here rather than downloaded from anywhere: the tarball a
-    # consumer installs is `dist/`, which is `tsc` output around the release module
-    # wasm-pack produces, and neither is committed. Gated on `verify` for the reason
-    # every publishing lane is — the tagged commit is the one that reaches the registry
-    # — and the package's own suite runs again over the exact tree being published, so
-    # the artefact offered is the one that passed. npm Trusted Publishing exchanges the
-    # job's OIDC identity for a short-lived token, so no API token is stored in the
-    # repository; `--provenance` attaches the signed build attestation npm renders on
-    # the package page. The step below publishes directly, so the trusted publisher has
-    # to be one that allows `npm publish`: a configuration created on npmjs.com allows
-    # only `npm stage publish` unless that is also selected.
+    # Nothing here builds, installs or packs: the tarball arrives from `build-npm` as an
+    # artifact, so this job — the one holding `id-token: write` — runs no package build or
+    # test tooling and never executes the package's devDependency tree. Its only registry
+    # operation is the npm CLI against bytes another job already built and tested. Gated
+    # on `verify` for the reason every publishing lane is: the
+    # tagged commit is the one that reaches the registry. npm Trusted Publishing exchanges
+    # the job's OIDC identity for a short-lived token, so no API token is stored in the
+    # repository; `--provenance` attaches the signed build attestation npm renders on the
+    # package page. The step below publishes directly, so the trusted publisher has to be
+    # one that allows `npm publish`: a configuration created on npmjs.com allows only
+    # `npm stage publish` unless that is also selected.
     name: Publish to npm
-    needs: [version-check, verify]
+    needs: [version-check, verify, build-npm]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm
@@ -271,8 +336,6 @@ jobs:
       contents: read
       id-token: write # Trusted Publishing; no API token is stored in the repository.
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       # `registry-url` is what points the CLI at the public registry rather than at
       # whatever npmrc the runner image carries. Provenance additionally requires the
       # package's `repository` to name the repository the workflow runs in, which this
@@ -283,8 +346,7 @@ jobs:
       # which is the field that switches setup-node's automatic npm caching on by
       # default — and this is the job holding `id-token: write`, where the action's own
       # security note and npm's release-build guidance both say not to restore a cache
-      # written elsewhere. The build resolves its tooling from the registry through
-      # `npm ci`, so nothing here needs one.
+      # written elsewhere. Nothing in this job resolves a dependency, so nothing needs one.
       - name: Install Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -292,29 +354,33 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
-      # No Cargo cache is restored here either: this job holds `id-token: write`
-      # and emits the SLSA provenance attestation, so the release WASM module is
-      # compiled cleanly from the locked sources rather than from a cache written
-      # by non-release runs.
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
-
-      - name: Install wasm-pack
-        # The same pin CI's wasm lane carries, for the same reason: this tool's
-        # release decides which binaryen optimises the module, so it decides the bytes
-        # of the tarball this job offers the registry — in the one job here holding
-        # `id-token: write`. See the comment on the step in ci.yml's `test-wasm`.
-        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+      - name: Download the tarball the release publishes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          tool: wasm-pack@0.15.1
+          name: npm-publish-tarball
+          path: ${{ runner.temp }}/npm-publish
 
-      - name: Build and test the package that will be published
-        # The same targets CI's wasm lane runs, so the tagged tree is proven by the suite
-        # the pull request was merged under and `dist/` is left holding the module that
-        # passed. On this fresh checkout `npm ci` runs first, from the committed
-        # lockfile, as the `wasm` target's prerequisite; then the release build,
-        # `npm run build`, the gzipped size budget, and `node --test`.
-        run: make test-wasm
+      - name: Verify the artifact is the one tarball for this tag
+        # Three facts, all read from the archive itself rather than from a checkout, so
+        # the identity asserted is the identity published: exactly one tarball arrived,
+        # its file name is the `name-version.tgz` its own manifest declares, and that
+        # version is the tag's — `version-check` has already tied the tag to the workspace
+        # version, so this ties the artefact to the same release. A second tarball, a
+        # stale one, or one re-packed from a different version fails here instead of at
+        # the registry, where a version cannot be taken back.
+        id: tarball
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tarballs=("${RUNNER_TEMP}"/npm-publish/*.tgz)
+          printf 'tarballs: %d\n' "${#tarballs[@]}"
+          test "${#tarballs[@]}" -eq 1
+          tarball="${tarballs[0]}"
+          read -r name version < <(python3 -c 'import json, sys, tarfile; manifest = json.load(tarfile.open(sys.argv[1]).extractfile("package/package.json")); print(manifest["name"], manifest["version"])' "${tarball}")
+          test "${tarball##*/}" = "${name}-${version}.tgz"
+          test "v${version}" = "${GITHUB_REF_NAME}"
+          printf 'name=%s\nversion=%s\ntarball=%s\n' "${name}" "${version}" "${tarball}" >> "${GITHUB_OUTPUT}"
+          printf '%s is %s@%s\n' "${tarball}" "${name}" "${version}"
 
       - name: Publish
         # A re-dispatch of a tag whose version already reached npm has to go green
@@ -322,20 +388,20 @@ jobs:
         # the version is the same probe the crates.io leg uses. A registry failure is
         # not read as "not published": the publish attempt that follows fails too, so an
         # outage is red rather than silently skipped.
-        working-directory: crates/opportune-wasm/js
+        env:
+          PACKAGE: ${{ steps.tarball.outputs.name }}
+          VERSION: ${{ steps.tarball.outputs.version }}
+          TARBALL: ${{ steps.tarball.outputs.tarball }}
         run: |
           set -euo pipefail
-          name="$(python3 -c 'import json; print(json.load(open("package.json"))["name"])')"
-          version="$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
-          if npm view "${name}@${version}" version >/dev/null 2>&1; then
-            echo "::notice::${name}@${version} is already on npm; nothing to publish"
+          if npm view "${PACKAGE}@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::${PACKAGE}@${VERSION} is already on npm; nothing to publish"
             exit 0
           fi
-          # --ignore-scripts: the package declares no lifecycle scripts, so this can
-          # only tighten — and it keeps a future prepublish hook from running in the
-          # one job holding `id-token: write`, closing the same door the `npm ci`
-          # install above already closes.
-          npm publish . --ignore-scripts --provenance --access public
+          # `--ignore-scripts` keeps a lifecycle hook in a future manifest from running in
+          # the one job holding `id-token: write`; the path is the verified artifact, so
+          # this publishes exactly the bytes `build-npm` packed and tested.
+          npm publish "${TARBALL}" --ignore-scripts --provenance --access public
 
   publish-crate:
     name: Publish to crates.io

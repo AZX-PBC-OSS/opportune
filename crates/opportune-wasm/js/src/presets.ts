@@ -16,7 +16,7 @@
  */
 
 import { reason, rejection } from "./errors.js";
-import { asPlainRecord, asRecord, optionsOf, typeName } from "./json.js";
+import { asPlainRecord, asRecord, assertCarryable, optionsOf, typeName } from "./json.js";
 import type {
   CapMeasure,
   CapPer,
@@ -162,6 +162,11 @@ export interface ScopedOptions {
  * A field the caller left absent keeps the rule type's default, so spreading only
  * what is present is what makes `who`/`when` overrides rather than a replacement
  * of both selectors.
+ *
+ * @throws OpportuneError with code `invalid_type` when either named selector is a
+ *   value the wire writes as no selector — a function or a symbol, or an object whose
+ *   JSON spelling is `{}`, `null` or no value — so the rule would leave here with the
+ *   default the caller meant to override.
  */
 function scoped<Rule extends { who?: Selector | null; when?: Selector | null }>(
   rule: Rule,
@@ -170,6 +175,15 @@ function scoped<Rule extends { who?: Selector | null; when?: Selector | null }>(
 ): Rule {
   if (who === undefined && when === undefined) {
     return rule;
+  }
+  // A `who` or `when` the wire writes as no selector is read as the field's own default
+  // rather than as the selector the caller wrote — the same silent answer the narrowing
+  // helpers refuse. `undefined` is "not named", so only a named value is checked.
+  if (who !== undefined) {
+    assertCarryable(who, "who");
+  }
+  if (when !== undefined) {
+    assertCarryable(when, "when");
   }
   return {
     ...rule,
@@ -764,11 +778,37 @@ function whoOf(who: Selector | null | undefined): Selector {
  *
  * An unconditional `who` becomes `selector` alone, an `all` gains the selector as one
  * more clause — so chained calls stay flat rather than nesting an `all` in an `all` —
- * and anything else becomes `all([existing, selector])`.
+ * and any other selector object becomes `all([existing, selector])`. A value that is
+ * not an object at all is carried through untouched, for the engine to reject at the
+ * field the caller wrote; a value the wire writes as no selector is refused here,
+ * because the engine never sees it.
+ *
+ * @throws OpportuneError with code `invalid_type` when either value is one the wire
+ *   writes as no selector — a function or a symbol, or an object whose JSON spelling is
+ *   `{}`, `null` or no value.
  */
 function narrowed(existing: Selector, selector: Selector): Selector {
+  // A function, a symbol, or an object that spells no selector (`{}` from a `Map`, a
+  // `Set`, a `RegExp` or an empty object; `null` from an invalid `Date`) is the malformed
+  // value the engine can never judge: the member is dropped or reads as the field's own
+  // default, so a `who` the wire reads as absent becomes `{ role: "host" }` and the
+  // engine answers a rule the caller never wrote, with nothing failing — the narrowing
+  // beside it silently gone. Every other malformed value survives serialization, as
+  // itself or as the `null` a dropped list member becomes, so the engine rejects it at
+  // the field the caller wrote.
+  assertCarryable(existing, "who");
+  assertCarryable(selector, "selector");
   if (existing === true) {
     return selector;
+  }
+  // `in` throws on the primitives, so the shape is confirmed before it is read —
+  // and a list is turned away with them, because a list of selectors is not itself
+  // one. JavaScript callers are not type-checked, so `who` is whatever the caller's
+  // variable held; leaving such a value unwrapped lets the engine's structured
+  // validation reject it at the `who` field the caller wrote, instead of this
+  // preset throwing a raw `TypeError` first.
+  if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
+    return existing;
   }
   if ("all" in existing && Array.isArray(existing.all)) {
     return { all: [...existing.all, selector] };
@@ -798,8 +838,9 @@ function narrowed(existing: Selector, selector: Selector): Selector {
  * carrying no `kind` — is rejected rather than spread into one, for the reason
  * {@link unless} rejects it.
  *
- * @throws OpportuneError with code `invalid_argument` when `rule` is not a rule
- *   object. The selector is the engine's to judge, with the pointer of the field it
+ * @throws OpportuneError with code `invalid_argument` when `rule` is not a rule object,
+ *   and `invalid_type` when `rule.who` or `selector` is a value the wire cannot carry.
+ *   Every other selector is the engine's to judge, with the pointer of the field it
  *   rejected.
  */
 export function andWho<Shape extends Rule>(rule: Shape, selector: Selector): Shape {
@@ -825,8 +866,10 @@ export function andWho<Shape extends Rule>(rule: Shape, selector: Selector): Sha
  * const cap = exceptWho(capPerDay({ tag: "interview" }, 2), { ids: ["ceo"] });
  * ```
  *
- * @throws OpportuneError with code `invalid_argument` when `rule` is not a rule
- *   object, as {@link andWho} rejects it.
+ * @throws OpportuneError with code `invalid_argument` when `rule` is not a rule object,
+ *   and `invalid_type` when `rule.who` is a value the wire cannot carry: both are
+ *   {@link andWho}'s, which this calls. A `selector` the wire cannot carry reaches the
+ *   engine inside `{ not: … }`, which rejects it as no selector.
  */
 export function exceptWho<Shape extends Rule>(rule: Shape, selector: Selector): Shape {
   return andWho(rule, { not: selector });

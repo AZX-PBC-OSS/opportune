@@ -21,32 +21,36 @@ Thank you for your interest in contributing to `opportune`.
 | `crates/opportune-adapters/` | Microsoft Graph and Google Calendar payload conversions into domain blocks and rules |
 | `crates/opportune-testkit/` | Independent reference oracle, property generators, golden corpus, and benchmarks (`publish = false`) |
 | `crates/opportune-py/` | PyO3 bindings (`_opportune`), typed Python package with generated Pydantic v2 models, presets, adapters, and tests |
-| `crates/opportune-wasm/` | WASM binding crate and `js/` npm package with generated TypeScript types, presets, adapters, and Node/Bun tests |
+| `crates/opportune-wasm/` | WASM binding crate, `js/` npm package with generated TypeScript types, presets, adapters, and Node/Bun tests, and `integration/{workerd,web}` private harnesses that run the packed tarball in real `workerd` and in Chromium/Firefox/WebKit |
 | `docs/` | MkDocs Material documentation site published to [azx-pbc-oss.github.io/opportune](https://azx-pbc-oss.github.io/opportune/) |
 | `.github/workflows/` | CI, `release-please`, docs deployment, and crates.io/PyPI/npm publishing |
 
 ## Common Development Commands
 
 ```console
-make install         # create the project .venv and build the Python extension
-make dev             # rebuild the Python extension after editing crates/*/src/
-make lint            # version checks, codegen drift (Python + TS), license copies, doc snippets, rustfmt, clippy, rustdoc, ruff, pyright, tsc
-make test            # cargo nextest --all-features, doctests, pytest, checked Python snippets, and Node WASM + TS snippet suites
-make test-matrix     # feature-flag combinations and wasm32 target checks
-make check           # lint + test + test-matrix + check-docs
-make codegen         # regenerate Pydantic models from the combined JSON Schema
-make codegen-ts      # regenerate TypeScript types and the packaged schema.json from the same schema
-make wasm            # build the release WASM module and npm package dist/
-make test-wasm       # build WASM, check the size budget, and run the Node suite + TS snippets
-make wasm-size       # measure the release WASM module against the gzipped budget
-make deny            # cargo-deny license, advisory, ban, and source policy
-make wheel           # build the Python sdist and wheel into dist/
-make docs            # build the documentation site with --strict
-make docs-serve      # live-reload preview of the documentation site
+make install           # create the project .venv and build the Python extension
+make dev               # rebuild the Python extension after editing crates/*/src/
+make lint              # version checks, codegen drift (Python + TS), license copies, doc snippets, rustfmt, clippy, rustdoc, ruff, pyright, tsc
+make test              # cargo nextest --all-features, doctests, pytest, checked Python snippets, and Node WASM + TS snippet suites
+make test-matrix       # feature-flag combinations and wasm32 target checks
+make check             # lint + test + test-matrix + check-docs
+make codegen           # regenerate Pydantic models from the combined JSON Schema
+make codegen-ts        # regenerate TypeScript types and the packaged schema.json from the same schema
+make wasm              # build the release WASM module and npm package dist/
+make test-wasm         # build WASM, check the size budget, run the Node suite + TS snippets, and run publint + attw on the packed tarball
+make test-wasm-workerd # run the workerd harness suite inside real Cloudflare `workerd` (@cloudflare/vitest-plugin)
+make test-wasm-web     # run the web harness suite in Chromium/Firefox/WebKit + a module Web Worker (Vitest Browser Mode + Playwright)
+make wasm-size         # measure the release WASM module against the gzipped budget
+make deny              # cargo-deny license, advisory, ban, and source policy
+make wheel             # build the Python sdist and wheel into dist/
+make docs              # build the documentation site with --strict
+make docs-serve        # live-reload preview of the documentation site
 ```
 
 ### Slow Verification Targets
 
+- `make test-wasm-workerd` installs the packed tarball into `crates/opportune-wasm/integration/workerd` and runs its Vitest suite inside real Cloudflare `workerd` via `@cloudflare/vitest-plugin`, proving the package's `workerd` loader against a precompiled static `.wasm` import (local `workerd`, so no Cloudflare account or network). The deployment-time Wrangler `CompiledWasm` rule is not exercised: the Vitest plugin compiles `.wasm` itself.
+- `make test-wasm-web` installs Playwright's Chromium, Firefox, and WebKit and runs Vitest Browser Mode against the packed tarball, plus a real module Web Worker bundle. Override the browser set with `OPPORTUNE_WEB_BROWSERS=chromium`.
 - `make determinism` runs the scenario suite in two separate OS processes and compares canonical output byte-for-byte (CI gates on this in addition to the in-suite check).
 - `make stress` runs ~50,000 generated engine-vs.-oracle comparisons spanning every rule kind, multi-participant matching, caps, occurrences, rest, zone periods, and daylight-saving transitions.
 
@@ -71,7 +75,7 @@ make check     # lint, tests, feature matrix, and docs
 make deny      # license, advisory, ban, and source policy
 ```
 
-CI additionally checks the Bun test lane, two-process `make determinism`, MSRV builds, and wheel/sdist packaging.
+CI additionally checks the Bun test lane, the Cloudflare `workerd` and browser/module Web Worker WASM lanes (`make test-wasm-workerd`, `make test-wasm-web`), two-process `make determinism`, MSRV builds, and wheel/sdist packaging.
 
 ### Pull Request Titles (Conventional Commits)
 
@@ -98,7 +102,7 @@ Re-running the workflow skips registries that already hold the tagged version, s
 All three registries publish via OIDC Trusted Publishing with no stored API tokens. Before the very first `0.1.0` publish:
 
 - **PyPI:** Configure a pending trusted publisher for `opportune` with workflow `publish.yml` and environment `pypi`.
-- **npm:** npm requires the package to exist before adding a trusted publisher. Publish `0.1.0` manually after `make test-wasm` (`npm publish crates/opportune-wasm/js --access public`), then add a trusted publisher for `opportune` with workflow `publish.yml`, environment `npm`, and **Allow npm publish** checked (`repository.url` must match this repo for `--provenance`).
+- **npm:** npm requires the package to exist before adding a trusted publisher. Publish `0.1.0` manually after `make test-wasm` (`npm publish crates/opportune-wasm/js --ignore-scripts --access public`), then add a trusted publisher for `opportune` with workflow `publish.yml`, environment `npm`, and **Allow npm publish** checked (`repository.url` must match this repo for `--provenance`).
 - **crates.io:** Publish `0.1.0` manually in dependency order (`cargo publish -p opportune`, then `-p opportune-json`, then `-p opportune-adapters`), waiting for each crate to become visible before the next, then configure a trusted publisher on **each** of the three crates with workflow `publish.yml` and environment `crates-io`.
 - **Tag trigger:** Tags created with the default `GITHUB_TOKEN` do not trigger workflows. Set the `RELEASE_PLEASE_APP_ID` repository variable and `RELEASE_PLEASE_APP_PRIVATE_KEY` secret so release tags start `publish.yml`, or dispatch `publish.yml` manually against the tag.
 

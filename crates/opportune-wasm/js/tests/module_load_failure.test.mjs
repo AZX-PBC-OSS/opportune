@@ -22,8 +22,11 @@
  * here and fail in the browser bundle the subpath exists for — and the last case here
  * reads the shipped graph itself to keep it that way.
  *
- * Each case copies `dist/` into a temporary directory and damages the module there,
- * so the checked-in build every other case answers from is never touched.
+ * Each case copies the published `dist/` and the manifest beside it into a temporary
+ * directory and damages the module there, so the checked-in build every other case
+ * answers from is never touched. The manifest travels with the tree because the
+ * loader is selected by `package.json#imports`: a copy without it has no `#wasm` to
+ * resolve, which is a different failure from the one these cases are about.
  *
  * Build the package first:
  *
@@ -40,8 +43,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-/** The built tree the tarball packs, and the module the loader reads from it. */
-const DIST = join(import.meta.dirname, "..", "dist");
+/** The package root this suite belongs to, and the built tree the tarball packs. */
+const PACKAGE = join(import.meta.dirname, "..");
+const DIST = join(PACKAGE, "dist");
+
+/** The glue the Node and Bun loader resolves, and the module it instantiates. */
+const GLUE = join("pkg", "opportune_wasm.cjs");
 const MODULE = join("pkg", "opportune_wasm_bg.wasm");
 
 /** What a caller does about a module that did not load: reinstall the published package. */
@@ -64,8 +71,9 @@ async function damaged(damage, check) {
   const dir = mkdtempSync(join(tmpdir(), "opportune-unbuilt-"));
   try {
     cpSync(DIST, join(dir, "dist"), { recursive: true });
+    cpSync(join(PACKAGE, "package.json"), join(dir, "package.json"));
     damage(join(dir, "dist"));
-    return await check((name) => import(pathToFileURL(join(dir, "dist", name)).href));
+    return await check((name) => import(pathToFileURL(join(dir, "dist", name)).href), join(dir, "dist"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -111,16 +119,18 @@ function thrown(call) {
 /**
  * The import specifiers `text` names, as written.
  *
- * Only statements are read: a line has to begin with `import`/`export` (indentation
- * allowed), or hold a dynamic `import(…)`. A specifier written inside a doc comment is
- * a mention, not an import, and the built files carry both.
+ * Only module syntax is read: a statement line has to begin with `import`/`export` and
+ * name its target after `from`, a side-effect import has to begin with `import`, or a
+ * dynamic `import(…)` supplies one. Anything else in the file — an `export const` whose
+ * value is a string, a specifier written inside a doc comment — is a value or a mention,
+ * not an import, and the built files carry both.
  */
 function specifiers(text) {
   const named = [];
   for (const match of text.matchAll(
-    /^[ \t]*(?:import|export)\s[^\n]*?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/gm,
+    /^[ \t]*(?:import|export)\s[^\n]*?\bfrom\s*["']([^"']+)["']|^[ \t]*import\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/gm,
   )) {
-    named.push(match[1] ?? match[2]);
+    named.push(match[1] ?? match[2] ?? match[3]);
   }
   return named;
 }
@@ -130,7 +140,7 @@ function specifiers(text) {
  *
  * The walk starts at the shipped file a consumer imports and follows only what it
  * actually reaches, so a module that lives in `dist/` but is not on this path — the
- * loader, the adapters, the browser stub — is not counted as part of it.
+ * loader, the adapters, the web loader — is not counted as part of it.
  */
 function graph(entry) {
   const reached = new Map();
@@ -173,6 +183,57 @@ test("a package whose module was never built imports, and fails on the first eng
   });
 });
 
+test("a bundled copy that kept the glue but dropped the module names the bundler repair", async () => {
+  // A bundler that copies `dist/pkg/opportune_wasm.cjs` but not the `.wasm` beside it
+  // reaches the generated loader and fails there, so the runtime's own failure is an
+  // `ENOENT` naming `opportune_wasm_bg.wasm` rather than one that could not be resolved.
+  // Reinstalling and rebuilding both succeed and change nothing about that tree, so the
+  // bundler note is the only repair a consumer can act on — and the runtime's cause is
+  // still what a log shows underneath.
+  await damaged(unbuilt, async (load) => {
+    const pkg = await load("index.js");
+    const error = thrown(() => new pkg.Engine());
+    assertLegible(error, "a bundled copy without its module");
+    assert.equal(
+      error.cause?.code,
+      "ENOENT",
+      `the runtime's own failure is the cause, not ${String(error.cause?.code)}`,
+    );
+    assert.match(error.message, /opportune_wasm_bg\.wasm/, "the message names the artefact that is missing");
+    assert.match(
+      error.message,
+      /serverExternalPackages/,
+      "the message names the Next.js repair for a bundled copy",
+    );
+    assert.match(error.message, /`external: \[\s*"opportune"\s*\]`/, "the message names the bundler repair");
+  });
+});
+
+test("an unrelated ENOENT keeps the plain repair rather than the bundler advice", async () => {
+  // Only the glue's own missing artefact is a bundling failure. An `ENOENT` a consumer's
+  // deployment meets for some other file is not repaired by keeping `opportune` external,
+  // so the note must not be attached to the code alone.
+  await damaged(
+    (dir) =>
+      writeFileSync(
+        join(dir, GLUE),
+        'const error = new Error("ENOENT: no such file or directory, open \'/srv/config.json\'");\n' +
+          'error.code = "ENOENT";\n' +
+          "throw error;\n",
+      ),
+    async (load) => {
+      const pkg = await load("index.js");
+      const error = thrown(() => new pkg.Engine());
+      assertLegible(error, "an unrelated missing file");
+      assert.doesNotMatch(
+        error.message,
+        /serverExternalPackages/,
+        "a file this package does not ship is not a reason to keep it external",
+      );
+    },
+  );
+});
+
 test("a module that is not WebAssembly fails the same way on first use, keeping the runtime's cause", async () => {
   await damaged(
     (dir) => writeFileSync(join(dir, MODULE), "not a wasm module"),
@@ -189,12 +250,12 @@ test("a module that is not WebAssembly fails the same way on first use, keeping 
 
 test("a module from an older surface names the export it lacks and the repair", async () => {
   // A `pkg/` left behind by an earlier build loads as a module object and exports the
-  // wrong surface, which is the drift the loader's name checks exist for: without them
-  // the call fails several frames deep with "`undefined` is not a function". The
-  // message has to name the export, say the surface is old, and give the same repair
-  // the load failures give — the wording a consumer acts on is one string.
+  // wrong surface, which is the drift the loader's single export check exists for:
+  // without it the call fails several frames deep with "not a constructor". The message
+  // has to name the export, say the surface is old, and give the same repair the load
+  // failures give — the wording a consumer acts on is one string.
   await damaged(
-    (dir) => writeFileSync(join(dir, "pkg", "opportune_wasm.cjs"), "module.exports = {};\n"),
+    (dir) => writeFileSync(join(dir, GLUE), "module.exports = {};\n"),
     async (load) => {
       const pkg = await load("index.js");
       const error = thrown(() => new pkg.Engine());
@@ -204,6 +265,57 @@ test("a module from an older surface names the export it lacks and the repair", 
       assert.equal(error.cause, undefined, "nothing underneath was raised, so nothing is attached");
     },
   );
+});
+
+test("a load that failed is retried, so a repaired install answers on the next call", async () => {
+  // The module is cached only once it loaded. A package whose glue is absent fails on
+  // the first engine call, and a caller who reinstalls or rebuilds — which is exactly
+  // what the failure tells them to do — must get a working engine from the same
+  // process: caching the failure would make a repaired package need a restart.
+  await damaged(
+    (dir) => rmSync(join(dir, GLUE)),
+    async (load, dir) => {
+      const pkg = await load("index.js");
+      assertLegible(thrown(() => new pkg.Engine()), "a missing glue");
+
+      cpSync(join(DIST, GLUE), join(dir, GLUE));
+      using engine = new pkg.Engine();
+      assert.equal(typeof engine.tzdbVersion, "string", "the repaired install answers");
+    },
+  );
+});
+
+test("stale glue is retried after repair rather than served from the require cache", async () => {
+  // This failure happens after require succeeded, so unlike a missing or corrupt module
+  // the runtime has a completed CommonJS evaluation it can cache. Retryability covers
+  // this validation failure too: replacing the stale glue must not leave the process
+  // permanently reading the old export object.
+  await damaged(
+    (dir) => writeFileSync(join(dir, GLUE), "module.exports = {};\n"),
+    async (load, dir) => {
+      const pkg = await load("index.js");
+      assertFailure(thrown(() => new pkg.Engine()), "stale glue");
+
+      cpSync(join(DIST, GLUE), join(dir, GLUE));
+      using engine = new pkg.Engine();
+      assert.equal(typeof engine.tzdbVersion, "string", "the repaired glue answers");
+    },
+  );
+});
+
+test("a module that failed inside the generated glue is retried after repair", async () => {
+  // The generated CommonJS glue reads and compiles the binary during require. That is
+  // a later failure than an absent glue, and runtimes must not retain its partial module
+  // in the require cache: the package deliberately caches successes only, so a repaired
+  // binary has to be reachable without restarting the process.
+  await damaged(unbuilt, async (load, dir) => {
+    const pkg = await load("index.js");
+    assertLegible(thrown(() => new pkg.Engine()), "a missing module");
+
+    cpSync(join(DIST, MODULE), join(dir, MODULE));
+    using engine = new pkg.Engine();
+    assert.equal(typeof engine.tzdbVersion, "string", "the repaired module answers");
+  });
 });
 
 test("the presets subpath builds rules out of a package with no module at all", async () => {
@@ -287,15 +399,17 @@ test("the adapters' constants answer from a package whose module was never built
   });
 });
 
-test("the presets module graph names no Node built-in", () => {
+test("the presets module graph names no Node built-in and no bare specifier", () => {
   // The `opportune/presets` promise has two halves: no WebAssembly (the case above
-  // proves it from a package whose module is absent) and no `node:module` or any other
-  // Node built-in, so a browser bundle can parse it. The second half is the one no lane
-  // can fail: Node and Bun both provide every built-in, so a `node:` import added to
+  // proves it from a package whose module is absent) and a graph a browser bundle can
+  // resolve from the package alone. The second half is the one no lane can fail at
+  // runtime: Node and Bun both provide every built-in, so a `node:` import added to
   // `sugar.ts` or `presets.ts` would resolve under `npm test`, under `bun test`, and
   // even under the packed consumer spawned with `--conditions=browser` — and break only
-  // in the bundle the subpath exists for. The shipped graph is what a bundler parses, so
-  // the shipped graph is what is read here.
+  // in the bundle the subpath exists for. The same is true of a bare specifier: `#wasm`
+  // or a dependency name would be resolved by the loader's manifest in Node and by a
+  // bundler's rules here, not by this subpath's own relative graph. The shipped graph is
+  // what a bundler parses, so the shipped graph is what is read here.
   const presets = graph(join(DIST, "presets-entry.js"));
   const builtins = [...presets].flatMap(([file, named]) =>
     named
@@ -307,15 +421,28 @@ test("the presets module graph names no Node built-in", () => {
     [],
     "`opportune/presets` reaches a Node built-in, so a browser bundle cannot load it:",
   );
+  const bare = [...presets].flatMap(([file, named]) =>
+    named
+      .filter((specifier) => !specifier.startsWith(".") && !isBuiltin(specifier))
+      .map((specifier) => `${file.slice(DIST.length + 1)} imports ${specifier}`),
+  );
+  assert.deepEqual(
+    bare,
+    [],
+    "`opportune/presets` reaches a bare specifier, so a browser bundle must resolve it " +
+      "from elsewhere rather than from the subpath's own relative graph:",
+  );
   // The walk is not vacuous, and it is not reading the whole tree: the engine's own
-  // graph is the one that does name a built-in, and the same walk finds it there.
-  const engine = graph(join(DIST, "wasm.js"));
+  // loader is the one that names Node built-ins, and the same walk finds them there.
+  const engine = graph(join(DIST, "wasm-node.js"));
   assert.ok(
     [...engine.values()].flat().includes("node:module"),
     "the walk finds the loader's own `node:module` import, so its silence about the presets means something",
   );
-  assert.ok(
-    !presets.has(join(DIST, "wasm.js")),
-    "the presets graph reaches the loader, so it is no longer pure TypeScript",
-  );
+  for (const loader of ["wasm.js", "wasm-node.js"]) {
+    assert.ok(
+      !presets.has(join(DIST, loader)),
+      "the presets graph reaches the loader, so it is no longer pure TypeScript",
+    );
+  }
 });

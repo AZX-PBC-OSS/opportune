@@ -1,5 +1,6 @@
 /**
- * The typed public API over the `opportune` engine, for Node and Bun.
+ * The typed public API over the `opportune` engine, for Node, Bun, Cloudflare Workers,
+ * browsers and module Web Workers.
  *
  * ```ts
  * import { businessHours, findAvailability, person, singleGoal } from "opportune";
@@ -20,10 +21,11 @@
  * engine reads and writes is a generated type re-exported here from the exported
  * JSON Schema, and every failure is an {@link OpportuneError}.
  *
- * Importing this module loads no WebAssembly: the module is loaded by the first call
- * that needs it, so a server that imports the package for a preset builder never
- * instantiates one. The version and marker constants it exports are stated in
- * `constants.ts`, which imports nothing, and the suite pins them against the module
+ * Importing this module instantiates no WebAssembly. Node and Bun defer loading the
+ * module to the first call that needs it; Cloudflare Worker bundles compile their static
+ * import eagerly but still defer instantiation. A server that imports the package for a
+ * preset builder therefore never instantiates one. The version and marker constants are
+ * stated in `constants.ts`, which imports nothing, and the suite pins them against the module
  * the package was built beside.
  *
  * The provider conversions live in `opportune/adapters/graph` and

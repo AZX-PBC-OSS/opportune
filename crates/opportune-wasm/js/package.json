@@ -25,16 +25,21 @@
     "node": ">=24"
   },
   "packageManager": "npm@11.20.0",
-  "sideEffects": [
-    "./dist/browser.js"
-  ],
+  "sideEffects": false,
+  "imports": {
+    "#wasm": {
+      "types": "./dist/wasm-node.d.ts",
+      "workerd": "./dist/wasm-workerd.js",
+      "browser": "./dist/wasm-web.js",
+      "worker": "./dist/wasm-web.js",
+      "node": "./dist/wasm-node.js",
+      "default": "./dist/wasm-node.js"
+    },
+    "#wasm-glue": "./dist/pkg/opportune_wasm.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/browser.js",
-      "edge-light": "./dist/browser.js",
-      "worker": "./dist/browser.js",
-      "node": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./presets": {
@@ -43,20 +48,17 @@
     },
     "./adapters/graph": {
       "types": "./dist/adapters/graph.d.ts",
-      "browser": "./dist/browser.js",
-      "edge-light": "./dist/browser.js",
-      "worker": "./dist/browser.js",
-      "node": "./dist/adapters/graph.js",
       "default": "./dist/adapters/graph.js"
     },
     "./adapters/google": {
       "types": "./dist/adapters/google.d.ts",
-      "browser": "./dist/browser.js",
-      "edge-light": "./dist/browser.js",
-      "worker": "./dist/browser.js",
-      "node": "./dist/adapters/google.js",
       "default": "./dist/adapters/google.js"
     },
+    "./web": {
+      "types": "./dist/web.d.ts",
+      "default": "./dist/web.js"
+    },
+    "./opportune_wasm_bg.wasm": "./dist/pkg/opportune_wasm_bg.wasm",
     "./package.json": "./package.json",
     "./schema.json": "./schema.json"
   },
@@ -68,13 +70,17 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node bin/bundle-module.mjs",
+    "build": "node bin/clean.mjs && tsc -p tsconfig.build.json && node bin/bundle-module.mjs",
     "check": "tsc -p tsconfig.check.json",
     "test": "node --test tests/"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@types/node": "^26.0.0",
     "json-schema-to-typescript": "^15.0.4",
-    "typescript": "^5.9.0"
+    "publint": "^0.3.25",
+    "shell-quote": "^1.12.0",
+    "typescript": "^5.9.0",
+    "yaml": "^2.9.1"
   }
 }

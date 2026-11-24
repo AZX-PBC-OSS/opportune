@@ -1,6 +1,6 @@
 # opportune
 
-Calendar availability and scheduling calculations across constraints, as a pure-Rust library with native Python and WebAssembly (Node/Bun) bindings.
+Calendar availability and scheduling calculations across constraints, as a pure-Rust library with native Python and WebAssembly (Node, Bun, Cloudflare Workers, browsers, and module Web Workers) bindings.
 
 `opportune` takes a scheduling request — `now`, a booking goal, participants with their calendars, and a rule list — and deterministically returns bookable offers, date counts, travel holds, and optional exclusion reasons. It supports all seven rule kinds (`window`, `blackout`, `clearance`, `lead_time`, `status_policy`, `rest`, `cap`), multi-participant weighted matching, confirm-time validation (`check_slot`), fetch-hull planning (`required_ranges`), a deterministic JSON wire format, and Microsoft Graph and Google Calendar payload adapters.
 
@@ -95,9 +95,9 @@ print(opportune.offer_start(response.offers[0]), opportune.offer_end(response.of
 
 Requests and responses are generated Pydantic v2 models that plug directly into FastAPI routes. Build and reuse one `opportune.Engine` — every call releases the GIL around Rust execution — and use `opportune.adapters.graph` / `opportune.adapters.google` to convert provider payloads. See [`docs/api.md`](docs/api.md#python) for the FastAPI lifespan and `*_async` pattern, Postgres rule upgrades, adapter helpers, and benchmarks.
 
-## TypeScript / Node / Bun
+## TypeScript / JavaScript
 
-Install the `opportune` npm package (Node 24+ or Bun 1.4.2+; WebAssembly engine with bundled time zone data, generated TypeScript types, presets, and Graph/Google adapter submodules):
+Install the `opportune` npm package (Node 24+ or Bun 1.4.2+; also Cloudflare Workers, browsers, and module Web Workers, selected by the `workerd`/`browser`/`worker` conditions on the package's private `#wasm` import — WebAssembly engine with bundled time zone data, generated TypeScript types, presets, and Graph/Google adapter submodules):
 
 ```sh
 npm install opportune
@@ -125,7 +125,7 @@ if (start !== "2027-06-14T08:00Z") throw new Error(`unexpected earliest start: $
 console.log(start);
 ```
 
-See [`docs/wasm.md`](docs/wasm.md) for runtime requirements, the JSON fast path, error handling, adapter usage, `opportune/presets` for browser/Edge bundles, and the gzipped bundle-size budget.
+See [`docs/wasm.md`](docs/wasm.md) for runtime requirements, the JSON fast path, error handling, adapter usage, `opportune/presets` for browser and module Web Worker bundles, and the gzipped bundle-size budget.
 
 ## Documentation
 
