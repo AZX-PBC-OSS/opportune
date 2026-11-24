@@ -86,6 +86,96 @@ test("initSync(bytes) initializes the public browser graph before any async call
   `, ["browser"]);
 });
 
+test("opportune/web resolves a promised URL before fetching it", () => {
+  publicGraph(`
+    import assert from "node:assert/strict";
+    import { readFileSync } from "node:fs";
+    import init from "opportune/web";
+    import { Engine } from "opportune";
+
+    const bytes = readFileSync(new URL("./dist/pkg/opportune_wasm_bg.wasm", import.meta.url));
+    const url = \`data:application/wasm;base64,\${bytes.toString("base64")}\`;
+    await init(Promise.resolve(url));
+
+    using engine = new Engine();
+    assert.match(engine.tzdbVersion, /^\\d{4}[a-z]$/);
+  `, ["browser"]);
+});
+
+test("an init() input no loader consumes cannot become an unhandled rejection", () => {
+  // `init()` takes `InitInput | Promise<InitInput>`, so the natural async spelling is
+  // `await init(fetch(url))`. A loader that already has its module never reads that
+  // argument — the documented no-op — but a promise nobody attaches a handler to still
+  // reports its rejection to the host, and Node ends the process on one. The caller
+  // cannot defend itself: `init()` resolves, so its `try`/`catch` catches nothing, and
+  // the exit happens after the engine call below has already succeeded. Each child here
+  // exits non-zero if the input was dropped rather than released.
+  for (const conditions of [["browser"], []]) {
+    publicGraph(`
+      import assert from "node:assert/strict";
+      import init, { initSync } from "opportune/web";
+      import { Engine } from "opportune";
+      ${
+        conditions.length === 0
+          ? ""
+          : `
+      import { readFileSync } from "node:fs";
+      initSync({
+        module: readFileSync(new URL("./dist/pkg/opportune_wasm_bg.wasm", import.meta.url)),
+      });`
+      }
+
+      await init(Promise.reject(new Error("a fetch this loader did not need")));
+
+      using engine = new Engine();
+      assert.match(engine.tzdbVersion, /^\\d{4}[a-z]$/);
+    `, conditions);
+  }
+});
+
+test("a second concurrent init() releases the input the in-flight load owns", () => {
+  // The third path that never reads its argument: `pending ??= instantiate(input)` means a
+  // caller arriving while a load is in flight contributes nothing, and its own promised
+  // input is nobody's. `init()` assigns `pending` synchronously — `instantiate` runs to its
+  // first `await` before `init()` returns — so the second call below is deterministically
+  // the in-flight case with no I/O to time, and the child exits non-zero if that argument
+  // was dropped rather than released. That one load is shared is pinned by the loopback
+  // case below, which counts the requests the loader actually made.
+  publicGraph(`
+    import assert from "node:assert/strict";
+    import { readFileSync } from "node:fs";
+    import init from "opportune/web";
+    import { Engine } from "opportune";
+
+    const bytes = readFileSync(new URL("./dist/pkg/opportune_wasm_bg.wasm", import.meta.url));
+    const loading = init(\`data:application/wasm;base64,\${bytes.toString("base64")}\`);
+    await init(Promise.reject(new Error("the in-flight load owns this one")));
+    await loading;
+
+    using engine = new Engine();
+    assert.match(engine.tzdbVersion, /^\\d{4}[a-z]$/);
+  `, ["browser"]);
+});
+
+test("a rejecting init() input still fails the load that needed it", () => {
+  // The other half of the contract: releasing an input a loader does not consume must
+  // not swallow one it does. Before any load, the promised input is what the module
+  // comes from, so its rejection has to surface as the structured failure, with the
+  // caller's own error as the cause.
+  publicGraph(`
+    import assert from "node:assert/strict";
+    import init from "opportune/web";
+
+    const failure = new Error("the .wasm URL does not resolve");
+    await assert.rejects(init(Promise.reject(failure)), (thrown) => {
+      assert.equal(thrown.name, "OpportuneError");
+      assert.equal(thrown.code, "wasm_unavailable");
+      assert.equal(thrown.cause, failure, "the caller's own rejection is the cause");
+      return true;
+    });
+  `, ["browser"]);
+});
+
 test("opportune/web and the root share initialization under default runtime conditions", () => {
   publicGraph(`
     import assert from "node:assert/strict";

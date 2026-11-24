@@ -124,7 +124,15 @@ function harnessFiles(dir = join(ROOT, INTEGRATION), prefix = INTEGRATION) {
       if (entry.isDirectory()) {
         // Installs and build output are not harness sources: `node_modules`, esbuild's
         // `dist`, Vitest's caches and Playwright's reports are all generated trees.
-        const generated = ["node_modules", "dist", "test-results", "playwright-report"].includes(entry.name) || entry.name.startsWith(".");
+        const generated = [
+          "node_modules",
+          "dist",
+          "test-results",
+          "playwright-report",
+          ".git",
+          ".wrangler",
+          ".vitest",
+        ].includes(entry.name);
         return generated ? [] : harnessFiles(join(dir, entry.name), path);
       }
       return entry.name === "package.json" || /(?:^Makefile$|\.(?:sh|[cm]?[jt]sx?|ya?ml)$)/.test(entry.name)
@@ -136,6 +144,16 @@ function harnessFiles(dir = join(ROOT, INTEGRATION), prefix = INTEGRATION) {
 
 /** Shell control operators that finish one command and can begin another. */
 const COMMAND_SEPARATORS = new Set([";", ";;", ";&", ";;&", "&", "&&", "||", "|", "|&"]);
+
+/** The npm subcommands that install packages, including both commands' documented aliases. */
+const INSTALL_SUBCOMMAND_SOURCE =
+  "ci|clean-install|ic|install-clean|isntall-clean|install|add|i|in|ins|inst|insta|instal|isnt|isnta|isntal|isntall";
+const INSTALL_SUBCOMMAND = new RegExp(`^(?:${INSTALL_SUBCOMMAND_SOURCE})$`);
+const INSTALL_SUBCOMMAND_WORD = new RegExp(`\\b(?:${INSTALL_SUBCOMMAND_SOURCE})\\b`);
+const DEFAULT_INSTALL = new RegExp(
+  `\\$\\{[A-Za-z_][A-Za-z0-9_]*:-(${INSTALL_SUBCOMMAND_SOURCE})\\}`,
+  "g",
+);
 
 /** The commands a shell script holds, as word lists; operators split commands. */
 function shellCommands(script) {
@@ -150,7 +168,12 @@ function shellCommands(script) {
   // (`$NPM ci`) is an install too, and the variable may be set outside the script — in the
   // workflow's `env`, or in an earlier step's exported environment. The caller judges the
   // token lists; a script that names no install is dropped there.
-  const lines = script.replace(/\\\r?\n/g, "").split(/\r?\n/);
+  const lines = script
+    // `${SUBCOMMAND:-ci}` can select the default install. Judge that installing
+    // outcome without treating every expansion after npm as a subcommand.
+    .replace(DEFAULT_INSTALL, "$1")
+    .replace(/\\\r?\n/g, "")
+    .split(/\r?\n/);
   return lines.flatMap((line) => {
     let tokens;
     try {
@@ -164,7 +187,13 @@ function shellCommands(script) {
     const commands = [[]];
     for (const token of tokens) {
       if (typeof token === "string") {
-        commands.at(-1).push(token);
+        // A command quoted for shell evaluation (`eval "npm ci"`, `sh -c "npm ci"`)
+        // arrives as one word. Split only a word that itself contains an install;
+        // ordinary quoted arguments retain their whitespace.
+        const words = /\s/.test(token) && /\bnpm\b/.test(token) && INSTALL_SUBCOMMAND_WORD.test(token)
+          ? token.split(/\s+/).filter(Boolean)
+          : [token];
+        commands.at(-1).push(...words);
         continue;
       }
       if ("comment" in token) break;
@@ -191,11 +220,21 @@ function lastIgnoreScriptsOption(words) {
   return words.filter((word) => /^--(?:no-)?ignore-scripts(?:=.*)?$/.test(word)).at(-1);
 }
 
+/** A word that invokes npm, including an absolute or relative executable path. */
+const NPM_COMMAND = /^(?:.*\/)?npm(?:\.(?:cjs|cmd|exe))?$/;
+
 /** Whether `words` invoke npm with one of its installing subcommands. */
 function runsNpmInstall(words) {
-  const command = words.join(" ");
-  return /\bnpm\b/.test(command) && /\b(ci|install|i)\b/.test(command);
+  // Associate an exact subcommand with an npm command word. Filenames (`install.js`),
+  // eval strings and shell's `in` keyword are arguments, not npm install aliases.
+  return words.some((word, index) =>
+    NPM_COMMAND.test(word) &&
+    words.slice(index + 1).some((argument) => INSTALL_SUBCOMMAND.test(argument))
+  );
 }
+
+/** JavaScript process functions whose first argument is a command to execute. */
+const PROCESS_COMMANDS = new Set(["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync"]);
 
 /** Whether a variable command name hides an installing subcommand, including behind a shell wrapper. */
 function runsDynamicInstall(words) {
@@ -206,11 +245,11 @@ function runsDynamicInstall(words) {
   // $PATTERN ci.yml`, `tar -xzf "$ARCHIVE" -C /tmp/install`) is data, not a command —
   // flagging it would fail every ordinary workflow step that interpolates a value.
   const first = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
-  const wrappers = new Set(["command", "env", "exec", "nice", "nohup", "time", "timeout", "sudo"]);
+  const wrappers = new Set(["command", "env", "nice", "nohup", "time", "timeout", "sudo"]);
   const dynamic =
     words[first] === "" ||
     (wrappers.has(words[first] ?? "") && words.slice(first + 1).includes(""));
-  return dynamic && /\b(ci|install|i)\b/.test(words.slice(first + 1).join(" "));
+  return dynamic && words.slice(first + 1).some((word) => INSTALL_SUBCOMMAND.test(word));
 }
 
 /** Whether one literal npm invocation owns the options in `words`. */
@@ -246,46 +285,169 @@ function markdownScripts(file, content) {
   return makefileScripts(file, content);
 }
 
-/** A source file a shell command is spawned from, with multiline calls reassembled. */
-function sourceScripts(file, content) {
-  const scripts = content.split(/\r?\n/).map((text, index) => ({ file, line: index + 1, text }));
-  if (!/\.[cm]?[jt]sx?$/.test(file)) return scripts;
+/** Whether a node is the module name of Node's process-spawning API. */
+function isChildProcessModule(node) {
+  return TS.isStringLiteral(node) && ["child_process", "node:child_process"].includes(node.text);
+}
 
-  // A formatter wraps long argument lists across lines, and a wrapped
-  // `spawnSync(⏎"npm",⏎["ci"],⏎)` is one call that no single line of it names whole.
-  // The TypeScript parser owns strings, comments and nesting; counting brackets in raw
-  // text would let a comment such as `// ))` end the call early. Keep each physical line
-  // as a fallback for indirect commands, and add each outermost multiline call, printed
-  // without comments, at its starting line. One-line calls are already complete there.
-  const source = TS.createSourceFile(
-    file,
-    content,
-    TS.ScriptTarget.ESNext,
-    true,
-    /\.tsx$/.test(file)
-      ? TS.ScriptKind.TSX
-      : /\.jsx$/.test(file)
-        ? TS.ScriptKind.JSX
-        : /\.[cm]?ts$/.test(file)
-          ? TS.ScriptKind.TS
-          : TS.ScriptKind.JS,
-  );
-  const printer = TS.createPrinter({ removeComments: true });
+/** Whether an initializer is a direct `require("child_process")` call. */
+function isChildProcessRequire(node) {
+  return node !== undefined &&
+    TS.isCallExpression(node) &&
+    TS.isIdentifier(node.expression) &&
+    node.expression.text === "require" &&
+    node.arguments.length === 1 &&
+    isChildProcessModule(node.arguments[0]);
+}
+
+/** Local process-function and whole-module bindings imported or required from child_process. */
+function childProcessBindings(source) {
+  const namespaces = new Set();
+  const functions = new Map();
+  const addFunction = (imported, local) => {
+    if (PROCESS_COMMANDS.has(imported)) functions.set(local, imported);
+  };
+  for (const statement of source.statements) {
+    if (!TS.isImportDeclaration(statement) || !isChildProcessModule(statement.moduleSpecifier)) continue;
+    const clause = statement.importClause;
+    if (clause === undefined || clause.isTypeOnly) continue;
+    if (clause.name !== undefined) namespaces.add(clause.name.text);
+    if (clause.namedBindings !== undefined && TS.isNamespaceImport(clause.namedBindings)) {
+      namespaces.add(clause.namedBindings.name.text);
+    }
+    if (clause.namedBindings !== undefined && TS.isNamedImports(clause.namedBindings)) {
+      for (const element of clause.namedBindings.elements) {
+        if (!element.isTypeOnly) addFunction(element.propertyName?.text ?? element.name.text, element.name.text);
+      }
+    }
+  }
   const visit = (node) => {
-    if (!TS.isCallExpression(node)) {
-      node.forEachChild(visit);
-      return;
+    if (TS.isVariableDeclaration(node) && isChildProcessRequire(node.initializer)) {
+      if (TS.isIdentifier(node.name)) namespaces.add(node.name.text);
+      if (TS.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          if (TS.isIdentifier(element.name)) {
+            addFunction(element.propertyName?.text ?? element.name.text, element.name.text);
+          }
+        }
+      }
     }
-    const start = source.getLineAndCharacterOfPosition(node.getStart(source));
-    const end = source.getLineAndCharacterOfPosition(Math.max(node.getStart(source), node.end - 1));
-    if (end.line > start.line) {
-      const printed = printer
-        .printNode(TS.EmitHint.Unspecified, node, source)
-        .replace(/\s*\r?\n\s*/g, " ");
-      const unit = scripts[start.line];
-      unit.text = `${unit.text.slice(0, start.character)}${printed}`;
+    node.forEachChild(visit);
+  };
+  visit(source);
+  return { namespaces, functions };
+}
+
+/** The canonical process-function name a call invokes, excluding methods such as RegExp.exec. */
+function processCallee(node, bindings) {
+  if (!TS.isCallExpression(node)) return undefined;
+  if (TS.isIdentifier(node.expression)) {
+    return bindings.functions.get(node.expression.text) ??
+      (PROCESS_COMMANDS.has(node.expression.text) ? node.expression.text : undefined);
+  }
+  if (
+    TS.isPropertyAccessExpression(node.expression) &&
+    TS.isIdentifier(node.expression.expression) &&
+    bindings.namespaces.has(node.expression.expression.text) &&
+    PROCESS_COMMANDS.has(node.expression.name.text)
+  ) {
+    return node.expression.name.text;
+  }
+  return undefined;
+}
+
+/** Literal command text, retaining a shell-visible placeholder for template substitutions. */
+function commandText(node) {
+  if (TS.isStringLiteral(node) || TS.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (TS.isTemplateExpression(node)) {
+    return node.head.text + node.templateSpans
+      .map((span) => `$OPPORTUNE_DYNAMIC${span.literal.text}`)
+      .join("");
+  }
+  return undefined;
+}
+
+/** Whether a literal options argument explicitly enables a command shell. */
+function usesShell(node) {
+  return node.arguments.slice(1).some((argument) =>
+    TS.isObjectLiteralExpression(argument) && argument.properties.some((property) => {
+      if (
+        !TS.isPropertyAssignment(property) ||
+        !(TS.isIdentifier(property.name) || TS.isStringLiteral(property.name)) ||
+        property.name.text !== "shell"
+      ) {
+        return false;
+      }
+      return property.initializer.kind === TS.SyntaxKind.TrueKeyword ||
+        (commandText(property.initializer)?.length ?? 0) > 0;
+    })
+  );
+}
+
+/** The command word lists one process call executes, without rewriting its source text. */
+function processCommands(node, callee) {
+  const command = node.arguments[0];
+  if (command === undefined) return [];
+  const text = commandText(command);
+  if (callee === "exec" || callee === "execSync") {
+    return text === undefined ? [] : shellCommands(text);
+  }
+
+  const arguments_ = node.arguments[1];
+  if (text !== undefined && usesShell(node)) {
+    if (arguments_ === undefined || !TS.isArrayLiteralExpression(arguments_)) {
+      return shellCommands(text);
     }
-    // The outermost call's text includes every nested call, so do not add duplicates.
+    const args = arguments_.elements.map(commandText);
+    const suffix = args.length > 0
+      ? ` ${args.map((argument) =>
+          argument === undefined ? "$OPPORTUNE_DYNAMIC" : shellQuote.quote([argument])
+        ).join(" ")}`
+      : "";
+    return shellCommands(`${text}${suffix}`);
+  }
+
+  // Without `shell`, spawn/execFile take an executable and an argument array, not shell
+  // source. Keep those words structured so whitespace, quotes and punctuation stay data.
+  const words = [text ?? ""];
+  if (arguments_ !== undefined && TS.isArrayLiteralExpression(arguments_)) {
+    for (const element of arguments_.elements) {
+      words.push(commandText(element) ?? "");
+    }
+  }
+  return [words];
+}
+
+/** Process invocations in JavaScript/TypeScript, or physical lines in a shell source. */
+function sourceScripts(file, content) {
+  if (!/\.[cm]?[jt]sx?$/.test(file)) {
+    return content.split(/\r?\n/).map((text, index) => ({ file, line: index + 1, text }));
+  }
+
+  const kind = /\.tsx$/.test(file)
+    ? TS.ScriptKind.TSX
+    : /\.jsx$/.test(file)
+      ? TS.ScriptKind.JSX
+      : /\.[cm]?ts$/.test(file)
+        ? TS.ScriptKind.TS
+        : TS.ScriptKind.JS;
+  const source = TS.createSourceFile(file, content, TS.ScriptTarget.ESNext, true, kind);
+  const bindings = childProcessBindings(source);
+  const scripts = [];
+  const visit = (node) => {
+    const callee = processCallee(node, bindings);
+    if (callee !== undefined) {
+      const commands = processCommands(node, callee);
+      if (commands.length > 0) {
+        scripts.push({
+          file,
+          line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+          text: node.getText(source),
+          commands,
+        });
+      }
+    }
+    node.forEachChild(visit);
   };
   visit(source);
   return scripts;
@@ -317,9 +479,11 @@ function makefileScripts(file, content) {
  *
  * A workflow is YAML and a package manifest is JSON, so both are read with the parser
  * that owns their grammar; a Makefile recipe is shell text with backslash continuations,
- * and a Markdown fenced block joins them the same way. Every script is then tokenised
- * with the shell parser, and each install is judged on the options of its own command: a
- * flag to the left of `;`/`&&`/`|` does not make the install to the right safe.
+ * and a Markdown fenced block joins them the same way. JavaScript/TypeScript process
+ * calls come from the TypeScript AST with their argument arrays intact; shell text and
+ * `exec` command strings are tokenised with the shell parser. Each install is judged on
+ * the options of its own command: a flag to the left of `;`/`&&`/`|` does not make the
+ * install to the right safe.
  */
 function npmInstalls(files) {
   const installs = [];
@@ -327,8 +491,8 @@ function npmInstalls(files) {
   for (const [file, content] of files) {
     // Each format is read with the parser that owns it, and the branch is explicit: a
     // Markdown page's fenced shell is the one other text format whose continuations join
-    // like a recipe's, while a source file a shell command is spawned from is read line by
-    // line. An unknown extension is not silently treated as a Makefile.
+    // like a recipe's. JavaScript/TypeScript sources yield their actual process calls;
+    // an unknown extension is not silently treated as a Makefile.
     const scripts = /(?:^|\/)package\.json$/.test(file)
       ? packageScripts(file, content)
       : /\.ya?ml$/.test(file)
@@ -338,15 +502,17 @@ function npmInstalls(files) {
           : /\.md$/.test(file)
             ? markdownScripts(file, content)
             : sourceScripts(file, content);
-    for (const { line, text } of scripts) {
-      const commands = shellCommands(text);
+    for (const { line, text, commands: parsed } of scripts) {
+      const commands = parsed ?? shellCommands(text);
       const installing = commands.filter(
         (words) => runsNpmInstall(words) || runsDynamicInstall(words),
       );
       // A word the shell expands — `NPM=npm; $NPM ci` — has no literal npm name. Judge
       // that command too, including when a separate literal install already supplied a
-      // flag; otherwise the safe command would make the dynamic one invisible.
-      if (installing.length === 0 && !runsNpmInstall(commands.flat())) continue;
+      // flag; otherwise the safe command would make the dynamic one invisible. Never
+      // flatten commands for this decision: an npm variable in one and shell's `in`
+      // keyword in another are not an invocation.
+      if (installing.length === 0) continue;
       const site = line === undefined ? file : `${file}:${line}`;
       installs.push(site);
       const safe =
@@ -615,32 +781,51 @@ test("the runtime-integration CI jobs are unprivileged, bounded and fed by the p
   // package, so what it runs is the artefact a consumer installs. The workflow is parsed
   // as YAML, so a permission, timeout or step cannot be hidden from the check by
   // indentation or a comment.
-  const RUNTIME_JOBS = [
-    { job: "test-wasm-workerd", target: /make test-wasm-workerd WORKERD_TARBALL=/ },
-    { job: "test-wasm-web", target: /make test-wasm-web WEB_TARBALL=/ },
-  ];
+  //
+  // The job set is derived rather than listed: a runtime-integration job is one that
+  // downloads the tarball `test-wasm` uploads, which is the arrangement the isolation
+  // exists for. Naming the two jobs this repository has today would leave a third runtime
+  // lane installing a pinned tree with whatever permissions its author remembered, and
+  // every gate green. The two names are still asserted present, so renaming a lane
+  // narrows the derived set here instead of silently dropping it.
+  const TARBALL = "npm-package-tarball";
+  const EXPECTED = ["test-wasm-workerd", "test-wasm-web"];
+  const downloadsTarball = (job) =>
+    (job.steps ?? []).some(
+      (step) =>
+        /^actions\/download-artifact@[0-9a-f]{40}$/.test(step.uses ?? "") &&
+        step.with?.name === TARBALL,
+    );
   const jobs = jobsIn(read(".github/workflows/ci.yml"));
-  for (const { job: name, target } of RUNTIME_JOBS) {
-    const job = jobs.get(name);
-    assert.ok(job !== undefined, `ci.yml declares no ${name} job`);
+  const runtime = [...jobs]
+    .filter(([, job]) => downloadsTarball(job))
+    .sort(([left], [right]) => left.localeCompare(right));
+  const names = runtime.map(([name]) => name);
+  for (const name of EXPECTED) {
+    assert.ok(
+      names.includes(name),
+      `ci.yml no longer feeds ${name} from the packed tarball, so the isolation this case ` +
+        "pins has nothing to check",
+    );
+  }
+  for (const [name, job] of runtime) {
     assert.deepEqual(
       job.permissions,
       { contents: "read" },
       `${name} must hold \`contents: read\` and no other permission`,
     );
     assert.equal(typeof job["timeout-minutes"], "number", `${name} has no explicit timeout`);
-    assert.equal(job.needs, "test-wasm", `${name} does not wait for the build`);
+    assert.ok(
+      [].concat(job.needs ?? []).includes("test-wasm"),
+      `${name} does not wait for the build`,
+    );
     const steps = job.steps ?? [];
     assert.ok(
       steps.some((step) => /^actions\/download-artifact@[0-9a-f]{40}$/.test(step.uses ?? "")),
       `${name} downloads no pinned artefact`,
     );
     assert.ok(
-      steps.some((step) => step.with?.name === "npm-package-tarball"),
-      `${name} consumes no tarball artefact`,
-    );
-    assert.ok(
-      steps.some((step) => target.test(step.run ?? "")),
+      steps.some((step) => /make test-wasm-[a-z-]+ [A-Z][A-Z0-9_]*TARBALL=/.test(step.run ?? "")),
       `${name} builds the package instead of running the artefact it downloaded`,
     );
   }
@@ -653,7 +838,7 @@ test("the runtime-integration CI jobs are unprivileged, bounded and fed by the p
     "test-wasm uploads no pinned artefact",
   );
   assert.ok(
-    producerSteps.some((step) => step.with?.name === "npm-package-tarball"),
+    producerSteps.some((step) => step.with?.name === TARBALL),
     "test-wasm uploads the tarball the runtime-integration jobs wait for",
   );
 
@@ -668,7 +853,7 @@ test("the runtime-integration CI jobs are unprivileged, bounded and fed by the p
         !commands.includes(INTEGRATION),
         `${file} ${jobName} holds \`id-token: write\` and reaches a runtime harness`,
       );
-      for (const { job: name } of RUNTIME_JOBS) {
+      for (const name of names) {
         assert.ok(
           !commands.includes(name),
           `${file} ${jobName} holds \`id-token: write\` and reaches ${name}`,
@@ -688,6 +873,24 @@ test("the npm-install gate reads TypeScript harness entry points", () => {
     'spawnSync("npm", ["ci"]);',
   ]]);
   assert.equal(offenders.length, 1, "a TypeScript harness install has no --ignore-scripts");
+});
+
+test("the npm-install gate reads executable sources in hidden directories", () => {
+  const root = mkdtempSync(join(tmpdir(), "opportune-harness-hidden-"));
+  try {
+    const source = 'spawnSync("npm", ["ci"]);\n';
+    mkdirSync(join(root, ".scripts"));
+    writeFileSync(join(root, ".scripts", "install.mjs"), source);
+    const file = `${INTEGRATION}/web/.scripts/install.mjs`;
+    assert.ok(
+      harnessFiles(root, `${INTEGRATION}/web`).includes(file),
+      "a hidden source directory is not necessarily generated output",
+    );
+    const { offenders } = npmInstalls([[file, source]]);
+    assert.equal(offenders.length, 1, "the hidden source's install has no --ignore-scripts");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the npm-install gate reads JSX and TSX harness entry points", () => {
@@ -732,6 +935,135 @@ test("a multiline JavaScript spawn cannot hide an npm install", () => {
     assert.equal(installs.length, 1, "the formatter's line breaks hid the npm invocation");
     assert.equal(offenders.length, 1, "the multiline spawn has no --ignore-scripts");
   }
+});
+
+test("JavaScript data and non-install process arguments stay outside the install gate", () => {
+  for (const source of [
+    'expect(commands).toEqual([\n  "npm",\n  "ci",\n]);',
+    'spawnSync(process.execPath, ["install.js"]);',
+    'spawnSync(process.execPath, ["-e", "for (const k in o) {}"]);',
+    'const match = /npm/.exec("npm ci");',
+    'const command = "npm ci";',
+  ]) {
+    assert.equal(
+      npmInstalls([[`${INTEGRATION}/web/fixture.ts`, source]]).installs.length,
+      0,
+      `ordinary source was read as an npm install: ${source}`,
+    );
+  }
+});
+
+test("multiline process diagnostics preserve each call's original source", () => {
+  const source = [
+    'spawnSync("npm", ["ci"]); const result = spawnSync(',
+    '  "npm",',
+    '  ["install"],',
+    ');',
+    "",
+  ].join("\n");
+  const { offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+  assert.equal(offenders.length, 2, "each process call is its own install site");
+  assert.ok(offenders.every((offender) => !offender.includes("spaspawnSync")), offenders.join("\n"));
+  assert.ok(
+    offenders.some((offender) => offender.includes('spawnSync(\n  "npm",\n  ["install"],\n)')),
+    offenders.join("\n"),
+  );
+});
+
+test("a JavaScript exec string is read as one shell command", () => {
+  for (const [command, expected] of [
+    ["npm ci", 1],
+    ["npm ci --ignore-scripts", 0],
+  ]) {
+    for (const source of [
+      `execSync(${JSON.stringify(command)});`,
+      `import * as childProcess from "node:child_process"; childProcess.execSync(${JSON.stringify(command)});`,
+      `const childProcess = require("child_process"); childProcess.execSync(${JSON.stringify(command)});`,
+    ]) {
+      const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/exec.ts`, source]]);
+      assert.equal(installs.length, 1, `${command} was not read as an install: ${source}`);
+      assert.equal(offenders.length, expected, source);
+    }
+  }
+});
+
+test("literal template strings cannot hide a JavaScript npm install", () => {
+  for (const [args, expected] of [
+    ["[`ci`]", 1],
+    ["[`ci`, `--ignore-scripts`]", 0],
+  ]) {
+    const source = `spawnSync(\`npm\`, ${args});`;
+    const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+    assert.equal(installs.length, 1, "the literal template command was not read as npm");
+    assert.equal(offenders.length, expected, source);
+  }
+});
+
+test("JavaScript argument separators do not corrupt an install's options", () => {
+  for (const source of [
+    'spawnSync("npm", ["ci", "--ignore-scripts"], { stdio: "inherit" });',
+    'execSync("npm ci --ignore-scripts", { cwd: "." });',
+  ]) {
+    const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+    assert.equal(installs.length, 1, source);
+    assert.equal(offenders.length, 0, source);
+  }
+});
+
+test("shell-mode spawn and execFile command strings stay in the install gate", () => {
+  for (const [source, expected] of [
+    ['spawn("npm ci", { shell: true });', 1],
+    ['spawnSync("npm ci", [], { shell: true });', 1],
+    ['execFile("npm ci", { shell: true });', 1],
+    ['spawn("npm", ["ci"], { shell: true });', 1],
+    ['spawn("npm", ["install", pkg], { shell: true });', 1],
+    ['spawn("npm", ["ci", "--prefix", dir], { shell: true });', 1],
+    ['spawn("npm ci --ignore-scripts", [], { shell: true });', 0],
+    ['spawn("npm", ["ci", "--ignore-scripts", dir], { shell: true });', 0],
+  ]) {
+    const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+    assert.equal(installs.length, 1, `the shell command was not read as an install: ${source}`);
+    assert.equal(offenders.length, expected, source);
+  }
+});
+
+test("aliased and scoped child_process bindings stay in the install gate", () => {
+  for (const source of [
+    'import { spawn as run } from "node:child_process"; run("npm", ["ci"]);',
+    'const { spawn: run } = require("node:child_process"); run("npm", ["ci"]);',
+    'function f() { const cp = require("node:child_process"); return cp.spawn("npm", ["ci"]); }',
+  ]) {
+    const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+    assert.equal(installs.length, 1, `the aliased process call was not read: ${source}`);
+    assert.equal(offenders.length, 1, source);
+  }
+});
+
+test("a computed JavaScript process command cannot hide an npm install", () => {
+  for (const source of [
+    'spawnSync(getNpm(), ["ci"]);',
+    'execSync(`npm ci ${FLAG}`);',
+  ]) {
+    const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+    assert.equal(installs.length, 1, `the computed command was not read as an install: ${source}`);
+    assert.equal(offenders.length, 1, `the computed command has no certain --ignore-scripts: ${source}`);
+  }
+});
+
+test("computed JavaScript non-install commands stay outside the install gate", () => {
+  for (const source of [
+    'spawnSync(getCommand(), ["run", "test"]);',
+    'execSync(`npm run ${SCRIPT}`);',
+  ]) {
+    assert.equal(npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]).installs.length, 0, source);
+  }
+});
+
+test("a JavaScript variable in process command position cannot hide an npm install", () => {
+  const source = 'const NPM = "npm"; spawnSync(NPM, ["ci"]);';
+  const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+  assert.equal(installs.length, 1, "the variable process command was not read as an install");
+  assert.equal(offenders.length, 1, "the variable process command has no --ignore-scripts");
 });
 
 test("the npm-install gate reads package scripts, not manifest prose", () => {
@@ -871,6 +1203,34 @@ test("a shell comment cannot hide installs on following lines", () => {
   assert.match(offenders[0], /npm install left-pad/);
 });
 
+test("an npm subcommand supplied by shell expansion fails closed", () => {
+  for (const [flag, expected] of [["", 1], [" --ignore-scripts", 0]]) {
+    const content = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      `      - run: npm \${SUBCOMMAND:-ci}${flag}`,
+      "",
+    ].join("\n");
+    const { installs, offenders } = npmInstalls([["ci.yml", content]]);
+    assert.equal(installs.length, 1, "the expanded subcommand was not read as a possible install");
+    assert.equal(offenders.length, expected, `npm expansion${flag}`);
+  }
+});
+
+test("a dynamic npm option value or run argument is not an install subcommand", () => {
+  for (const command of ["npm --prefix $DIR run test", "npm run $SCRIPT"]) {
+    const content = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      `      - run: ${command}`,
+      "",
+    ].join("\n");
+    assert.equal(npmInstalls([["ci.yml", content]]).installs.length, 0, command);
+  }
+});
+
 test("a variable installer named outside the script is still an unsafe site", () => {
   // `$NPM` may be set by the workflow's `env` or an earlier exported step, so the script
   // itself names no literal `npm` and no literal installing subcommand. Reading only
@@ -928,6 +1288,54 @@ test("npm's last ignore-scripts spelling decides whether the install is safe", (
   assert.deepEqual(counts, commands.map(([, offenders]) => offenders));
 });
 
+
+test("every npm install alias requires --ignore-scripts", () => {
+  // npm's own `install --help` lists these aliases. They reach the same installer and
+  // lifecycle scripts as the canonical spelling, so none may be a scanner blind spot.
+  for (const alias of [
+    "add",
+    "i",
+    "in",
+    "ins",
+    "inst",
+    "insta",
+    "instal",
+    "isnt",
+    "isnta",
+    "isntal",
+    "isntall",
+    "clean-install",
+    "ic",
+    "install-clean",
+    "isntall-clean",
+  ]) {
+    for (const [flag, expected] of [["", 1], [" --ignore-scripts", 0]]) {
+      const content = [
+        "jobs:",
+        "  build:",
+        "    steps:",
+        `      - run: npm ${alias} left-pad${flag}`,
+        "",
+      ].join("\n");
+      const { installs, offenders } = npmInstalls([["ci.yml", content]]);
+      assert.equal(installs.length, 1, `npm ${alias} was not read as an install`);
+      assert.equal(offenders.length, expected, `npm ${alias}${flag}`);
+    }
+  }
+
+  const control = [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: 'for package in a b; do echo \"npm package ${package}\"; done'",
+    "",
+  ].join("\n");
+  assert.equal(
+    npmInstalls([["ci.yml", control]]).installs.length,
+    0,
+    "shell's `in` keyword and later npm prose are not an `npm in` invocation",
+  );
+});
 
 test("quoted text cannot hide an install, and .yaml files are read too", () => {
   const content = [

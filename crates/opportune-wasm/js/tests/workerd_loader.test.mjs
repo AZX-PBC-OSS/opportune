@@ -40,12 +40,16 @@ test("the workerd loader keeps failures retryable and caches only success", () =
         resolve(specifier, context, nextResolve) {
           if (specifier === "#wasm-glue") {
             const source = \`
+              let wasm;
               export function initSync({ module }) {
+                if (wasm !== undefined) return wasm;
                 globalThis.__workerAttempts += 1;
                 globalThis.__workerInput = module;
                 if (globalThis.__workerFailure !== undefined) {
                   throw globalThis.__workerFailure;
                 }
+                wasm = { exports: true };
+                return wasm;
               }
               \${globalThis.__workerWithEngine ? "export class WasmEngine {}" : ""}
             \`;
@@ -84,7 +88,7 @@ test("the workerd loader keeps failures retryable and caches only success", () =
 
       globalThis.__workerFailure = undefined;
       const loaded = loader.wasmModule();
-      assert.equal(globalThis.__workerAttempts, 2, "the failed attempt was cached");
+      assert.equal(globalThis.__workerAttempts, 2, "the failed load was cached instead of retried");
       assert.equal(globalThis.__workerInput, precompiled);
       assert.equal(loader.wasmModule(), loaded);
       loader.initSync();
@@ -102,23 +106,27 @@ test("the workerd loader rejects stale glue and never half-caches it", () => {
   // `WasmEngine`, instantiation itself succeeds, and the loader must refuse it with
   // the repairable error. The refusal cannot heal in-process — the glue is a static
   // import, so only a fresh isolate (after `npm install` or `make wasm`) gets one —
-  // but neither may the bad module be cached as loaded: every attempt re-runs
-  // instantiation and reports the same error, never a wedged half-state.
+  // but neither may the bad module be cached as loaded. Real wasm-bindgen glue
+  // initializes once and then early-returns, so instantiation happens only once
+  // while every loader attempt reports the same export-check error.
   const run = spawnSync(
     NODE,
     ["--input-type=module", "--eval", `
       import assert from "node:assert/strict";
       import { registerHooks } from "node:module";
 
-      globalThis.__workerWithEngine = false;
-      globalThis.__workerAttempts = 0;
+      globalThis.__workerInstantiated = 0;
 
       registerHooks({
         resolve(specifier, context, nextResolve) {
           if (specifier === "#wasm-glue") {
             const source = \`
+              let wasm;
               export function initSync() {
-                globalThis.__workerAttempts += 1;
+                if (wasm !== undefined) return wasm;
+                globalThis.__workerInstantiated += 1;
+                wasm = { exports: true };
+                return wasm;
               }
             \`;
             return {
@@ -137,7 +145,9 @@ test("the workerd loader rejects stale glue and never half-caches it", () => {
       });
 
       const loader = await import(${JSON.stringify(LOADER)});
+      assert.equal(globalThis.__workerInstantiated, 0, "importing the loader instantiated WASM");
 
+      const messages = [];
       for (const attempt of [1, 2]) {
         assert.throws(
           () => loader.wasmModule(),
@@ -146,12 +156,14 @@ test("the workerd loader rejects stale glue and never half-caches it", () => {
             assert.equal(thrown.code, "wasm_unavailable");
             assert.match(thrown.message, /WasmEngine/);
             assert.match(thrown.message, /make wasm/);
+            messages.push(thrown.message);
             return true;
           },
           "attempt " + attempt + " did not report the stale-glue rejection",
         );
-        assert.equal(globalThis.__workerAttempts, attempt, "each attempt re-ran instantiation");
       }
+      assert.equal(messages[0], messages[1], "the two attempts reported different errors");
+      assert.equal(globalThis.__workerInstantiated, 1, "the stale glue initialized more than once");
     `],
     { cwd: PACKAGE, encoding: "utf8", timeout: 10_000 },
   );

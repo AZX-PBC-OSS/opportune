@@ -12,7 +12,7 @@
 import initWasm, * as glue from "#wasm-glue";
 
 import { reason, rejection } from "./errors.js";
-import { REPAIR, type WasmModule } from "./wasm.js";
+import { exportsEngine, REPAIR, type WasmModule } from "./wasm.js";
 
 /** Synchronous initialization input: a precompiled module or raw WASM bytes. */
 export type SyncInitInput = WebAssembly.Module | ArrayBuffer | ArrayBufferView;
@@ -98,11 +98,8 @@ export function initSync(options?: { module: SyncInitInput }): void {
 
 async function instantiate(input: InitInput | Promise<InitInput> | undefined): Promise<WasmModule> {
   try {
-    if (input === undefined) {
-      await initWasm();
-    } else {
-      await initWasm({ module_or_path: input });
-    }
+    const resolved = input === undefined ? undefined : await input;
+    await initWasm(resolved === undefined ? undefined : { module_or_path: resolved });
   } catch (cause) {
     throw rejection(
       "wasm_unavailable",
@@ -115,7 +112,7 @@ async function instantiate(input: InitInput | Promise<InitInput> | undefined): P
 }
 
 function validated(candidate: WasmModule): WasmModule {
-  if (typeof candidate.WasmEngine !== "function") {
+  if (!exportsEngine(candidate)) {
     throw rejection(
       "wasm_unavailable",
       `the opportune WASM module does not export WasmEngine: it was built from an older ` +

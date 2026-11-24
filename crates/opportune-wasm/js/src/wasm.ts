@@ -70,6 +70,15 @@ export interface WasmModule {
   readonly graph_extended_property_expand: () => string;
 }
 
+/** Whether a loaded candidate exports the engine class every runtime constructs. */
+export function exportsEngine(candidate: unknown): boolean {
+  return (
+    (typeof candidate === "object" || typeof candidate === "function") &&
+    candidate !== null &&
+    typeof (candidate as { WasmEngine?: unknown }).WasmEngine === "function"
+  );
+}
+
 /**
  * What a caller does about a module that did not load.
  *

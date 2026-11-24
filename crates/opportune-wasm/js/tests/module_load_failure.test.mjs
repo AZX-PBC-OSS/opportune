@@ -183,6 +183,57 @@ test("a package whose module was never built imports, and fails on the first eng
   });
 });
 
+test("a bundled copy that kept the glue but dropped the module names the bundler repair", async () => {
+  // A bundler that copies `dist/pkg/opportune_wasm.cjs` but not the `.wasm` beside it
+  // reaches the generated loader and fails there, so the runtime's own failure is an
+  // `ENOENT` naming `opportune_wasm_bg.wasm` rather than one that could not be resolved.
+  // Reinstalling and rebuilding both succeed and change nothing about that tree, so the
+  // bundler note is the only repair a consumer can act on — and the runtime's cause is
+  // still what a log shows underneath.
+  await damaged(unbuilt, async (load) => {
+    const pkg = await load("index.js");
+    const error = thrown(() => new pkg.Engine());
+    assertLegible(error, "a bundled copy without its module");
+    assert.equal(
+      error.cause?.code,
+      "ENOENT",
+      `the runtime's own failure is the cause, not ${String(error.cause?.code)}`,
+    );
+    assert.match(error.message, /opportune_wasm_bg\.wasm/, "the message names the artefact that is missing");
+    assert.match(
+      error.message,
+      /serverExternalPackages/,
+      "the message names the Next.js repair for a bundled copy",
+    );
+    assert.match(error.message, /`external: \[\s*"opportune"\s*\]`/, "the message names the bundler repair");
+  });
+});
+
+test("an unrelated ENOENT keeps the plain repair rather than the bundler advice", async () => {
+  // Only the glue's own missing artefact is a bundling failure. An `ENOENT` a consumer's
+  // deployment meets for some other file is not repaired by keeping `opportune` external,
+  // so the note must not be attached to the code alone.
+  await damaged(
+    (dir) =>
+      writeFileSync(
+        join(dir, GLUE),
+        'const error = new Error("ENOENT: no such file or directory, open \'/srv/config.json\'");\n' +
+          'error.code = "ENOENT";\n' +
+          "throw error;\n",
+      ),
+    async (load) => {
+      const pkg = await load("index.js");
+      const error = thrown(() => new pkg.Engine());
+      assertLegible(error, "an unrelated missing file");
+      assert.doesNotMatch(
+        error.message,
+        /serverExternalPackages/,
+        "a file this package does not ship is not a reason to keep it external",
+      );
+    },
+  );
+});
+
 test("a module that is not WebAssembly fails the same way on first use, keeping the runtime's cause", async () => {
   await damaged(
     (dir) => writeFileSync(join(dir, MODULE), "not a wasm module"),

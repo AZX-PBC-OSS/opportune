@@ -376,12 +376,18 @@ test("a CommonJS consumer builds an engine synchronously and reads the schema", 
     consumer,
     [
       `const pkg = require(${JSON.stringify(MANIFEST.name)});`,
+      `const { readFileSync } = require("node:fs");`,
       `const presets = require(${JSON.stringify(`${MANIFEST.name}/presets`)});`,
       `const graph = require(${JSON.stringify(`${MANIFEST.name}/adapters/graph`)});`,
       `const google = require(${JSON.stringify(`${MANIFEST.name}/adapters/google`)});`,
       `const web = require(${JSON.stringify(`${MANIFEST.name}/web`)});`,
       `const manifest = require(${JSON.stringify(`${MANIFEST.name}/package.json`)});`,
       `const schema = require(${JSON.stringify(`${MANIFEST.name}/schema.json`)});`,
+      // The eighth export, and the one the browser documentation tells every bundler
+      // consumer to import: `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"`
+      // resolves through this same entry. Resolved, not required — a consumer's bundler
+      // turns it into a URL, and `require()` of a binary would throw for the wrong reason.
+      `const wasmAsset = require.resolve(${JSON.stringify(`${MANIFEST.name}/opportune_wasm_bg.wasm`)});`,
       "const engine = new pkg.Engine();",
       "const tzdb = engine.tzdbVersion;",
       "const limit = pkg.defaultLimits().max_search_window_days;",
@@ -396,6 +402,7 @@ test("a CommonJS consumer builds an engine synchronously and reads the schema", 
       "  webDefault: typeof web.default,",
       "  manifestVersion: manifest.version,",
       "  schema: schema.$schema,",
+      '  wasmMagic: readFileSync(wasmAsset).subarray(0, 4).toString("latin1"),',
       "  tzdb,",
       "  limit,",
       "}));",
@@ -422,6 +429,13 @@ test("a CommonJS consumer builds an engine synchronously and reads the schema", 
   assert.equal(required.webInit, "function");
   assert.equal(required.webDefault, "function");
   assert.equal(required.schema, "https://json-schema.org/draft/2020-12/schema");
+  // An unmapped or mistyped asset subpath fails a consumer's build with
+  // `ERR_PACKAGE_PATH_NOT_EXPORTED` while every test here stays green, because the
+  // tarball-content cases check the file, not the entry that reaches it. Reading the
+  // WebAssembly magic pins both ends: the documented entry resolves, and it resolves to
+  // the module binary rather than to something a bundler would serve as a URL and hand
+  // to `init(...)` as a document that is not WebAssembly.
+  assert.equal(required.wasmMagic, "\0asm", "the asset subpath did not resolve to the module binary");
   // The same script built an engine, read the module's own time zone database version
   // and released it, all without a tick: a build whose glue needed the asynchronous
   // initialiser would fail here rather than in a consumer's server.

@@ -25,7 +25,7 @@
 import { createRequire } from "node:module";
 
 import { reason, rejection } from "./errors.js";
-import { REPAIR, type WasmModule } from "./wasm.js";
+import { exportsEngine, REPAIR, type WasmModule } from "./wasm.js";
 
 const require = createRequire(import.meta.url);
 
@@ -38,12 +38,13 @@ const require = createRequire(import.meta.url);
 const GLUE = "./pkg/opportune_wasm.cjs";
 
 /**
- * What a caller does when the generated loader could not be *resolved*, rather than run.
+ * What a caller does when a bundler produced this build without what the loader reads.
  *
  * A bundler that inlines this package into one output file moves `dist/index.js` away
  * from the `dist/pkg/` pair beside it, so `require` resolves next to the bundle and finds
- * nothing: the file is present in `node_modules` and absent from the build's own tree.
- * Reinstalling and rebuilding both succeed and change nothing, so this is the one case
+ * nothing; one that copies the glue but drops the `.wasm` beside it fails a step later.
+ * Either way the file is present in `node_modules` and absent from the build's own tree,
+ * so reinstalling and rebuilding both succeed and change nothing. This is the one case
  * where the advice above is the wrong advice — and it is the case a deployment meets
  * first, since a serverless function is a bundle.
  */
@@ -54,27 +55,45 @@ const BUNDLED =
 
 /**
  * The repair guidance for a load failure, with the bundler note when `cause` is a
- * resolution failure.
+ * resolution failure or a bundled copy's missing artefact.
  *
  * `require` reports a module that is not beside the loader in the runtime's own words:
  * Node sets `code: "MODULE_NOT_FOUND"`, Bun and the bundlers word it as `Cannot find
- * module`/`Cannot find package` without one. Both are read, so the hint reaches the
- * consumer whichever runtime bundled them.
+ * module`/`Cannot find package` without one. A glue that was copied without the `.wasm`
+ * it reads fails a step later, as an `ENOENT` naming that file. All three are read, so
+ * the hint reaches the consumer whichever runtime bundled them.
  */
 function repair(cause?: unknown): string {
-  return resolutionFailure(cause) ? `${REPAIR} ${BUNDLED}` : REPAIR;
+  return resolutionFailure(cause) || bundledArtifactFailure(cause)
+    ? `${REPAIR} ${BUNDLED}`
+    : REPAIR;
 }
 
 /** Whether `cause` is the runtime saying it could not resolve the module at all. */
 function resolutionFailure(cause: unknown): boolean {
-  const code =
-    typeof cause === "object" && cause !== null
-      ? (cause as { code?: unknown }).code
-      : undefined;
+  const code = codeOf(cause);
   if (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") {
     return true;
   }
   return /\bCannot find (?:module|package)\b/.test(reason(cause));
+}
+
+/**
+ * Whether `cause` is a bundled copy of this package that lost the `.wasm` its glue reads.
+ *
+ * The code alone is not enough: an `ENOENT` for any other file — a document, a time zone
+ * directory, a consumer's own configuration — is not repaired by keeping this package
+ * external, so the message has to name this package's artefact too.
+ */
+function bundledArtifactFailure(cause: unknown): boolean {
+  return codeOf(cause) === "ENOENT" && /opportune_wasm_bg\.wasm/.test(reason(cause));
+}
+
+/** The runtime's `code` for `cause`, when it set one. */
+function codeOf(cause: unknown): unknown {
+  return typeof cause === "object" && cause !== null
+    ? (cause as { code?: unknown }).code
+    : undefined;
 }
 
 /** The generated module, loaded on the first call. */
@@ -137,13 +156,4 @@ function load(): WasmModule {
     );
   }
   return glue as WasmModule;
-}
-
-/** Whether `glue` exports the engine class, which is what makes it this crate's module. */
-function exportsEngine(glue: unknown): boolean {
-  return (
-    (typeof glue === "object" || typeof glue === "function") &&
-    glue !== null &&
-    typeof (glue as { WasmEngine?: unknown }).WasmEngine === "function"
-  );
 }

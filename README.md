@@ -97,7 +97,7 @@ Requests and responses are generated Pydantic v2 models that plug directly into 
 
 ## TypeScript / JavaScript
 
-Install the `opportune` npm package (Node 24+ or Bun 1.4.2+; also Cloudflare Workers, browsers, and generic Web Workers via the `workerd`/`browser`/`worker` export conditions — WebAssembly engine with bundled time zone data, generated TypeScript types, presets, and Graph/Google adapter submodules):
+Install the `opportune` npm package (Node 24+ or Bun 1.4.2+; also Cloudflare Workers, browsers, and generic Web Workers, selected by the `workerd`/`browser`/`worker` conditions on the package's private `#wasm` import — WebAssembly engine with bundled time zone data, generated TypeScript types, presets, and Graph/Google adapter submodules):
 
 ```sh
 npm install opportune
