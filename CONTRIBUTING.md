@@ -21,7 +21,7 @@ Thank you for your interest in contributing to `opportune`.
 | `crates/opportune-adapters/` | Microsoft Graph and Google Calendar payload conversions into domain blocks and rules |
 | `crates/opportune-testkit/` | Independent reference oracle, property generators, golden corpus, and benchmarks (`publish = false`) |
 | `crates/opportune-py/` | PyO3 bindings (`_opportune`), typed Python package with generated Pydantic v2 models, presets, adapters, and tests |
-| `crates/opportune-wasm/` | WASM binding crate and `js/` npm package with generated TypeScript types, presets, adapters, and Node/Bun tests |
+| `crates/opportune-wasm/` | WASM binding crate, `js/` npm package with generated TypeScript types, presets, adapters, and Node/Bun tests, and `integration/{workerd,web}` private harnesses that run the packed tarball in real `workerd` and in Chromium/Firefox/WebKit |
 | `docs/` | MkDocs Material documentation site published to [azx-pbc-oss.github.io/opportune](https://azx-pbc-oss.github.io/opportune/) |
 | `.github/workflows/` | CI, `release-please`, docs deployment, and crates.io/PyPI/npm publishing |
 
@@ -38,8 +38,8 @@ make codegen           # regenerate Pydantic models from the combined JSON Schem
 make codegen-ts        # regenerate TypeScript types and the packaged schema.json from the same schema
 make wasm              # build the release WASM module and npm package dist/
 make test-wasm         # build WASM, check the size budget, run the Node suite + TS snippets, and run publint + attw on the packed tarball
-make test-wasm-workerd # run the suite inside real Cloudflare `workerd` (@cloudflare/vitest-plugin)
-make test-wasm-web     # run the suite in Chromium/Firefox/WebKit + a module Web Worker (Vitest Browser Mode + Playwright)
+make test-wasm-workerd # run the workerd harness suite inside real Cloudflare `workerd` (@cloudflare/vitest-plugin)
+make test-wasm-web     # run the web harness suite in Chromium/Firefox/WebKit + a module Web Worker (Vitest Browser Mode + Playwright)
 make wasm-size         # measure the release WASM module against the gzipped budget
 make deny              # cargo-deny license, advisory, ban, and source policy
 make wheel             # build the Python sdist and wheel into dist/

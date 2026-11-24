@@ -44,11 +44,11 @@ export default { serverExternalPackages: ["opportune"] };
 ```
 
 - **Pure builders with zero WebAssembly (`opportune/presets`):** if a bundle only needs rule presets, `offer*` accessors, `publicResponse`/`publicSlotCheck`, `httpStatusForError`, `isKnownStatus`, marker constants, `OpportuneError`, or generated TypeScript types, import `opportune/presets`. It loads no WebAssembly and no `node:` modules.
-- **Not claimed:** Deno and deprecated Next.js Edge (`edge-light`) are untested and not claimed.
+- **Not claimed:** Deno, the deprecated Next.js Edge runtime (`edge-light`), and any browser outside the Playwright matrix above are untested and not claimed.
 
 ### Cloudflare Workers: compile the module in the bundle
 
-A Worker has no filesystem, so the `.wasm` must arrive as part of the bundle. Wrangler compiles a static `.wasm` import into a `WebAssembly.Module` when a `CompiledWasm` rule matches it (`fallthrough` leaves every other import on Wrangler's default rules):
+A Worker has no filesystem, so the `.wasm` must arrive as part of the bundle. Wrangler compiles a static `.wasm` import into a `WebAssembly.Module` when a `CompiledWasm` rule matches it (`fallthrough: true` matters only if you declare a second rule of the same `type`, which it keeps eligible; imports of other types are unaffected by it):
 
 ```jsonc
 // wrangler.jsonc
@@ -389,9 +389,14 @@ Without `windows-zones`, calendars naming a Windows time zone return an `unavail
 make wasm              # build the release WASM module and dist/
 make wasm-size         # check the gzipped bundle-size budget
 make test-wasm         # check the budget, run the Node test suite, and run TypeScript doc snippets
-make test-wasm-workerd # run the same suite inside real Cloudflare workerd
-make test-wasm-web     # run the same suite in Chromium, Firefox, WebKit, and a module Web Worker
+make test-wasm-workerd # run the Workers harness suite inside real Cloudflare workerd
+make test-wasm-web     # run the Web harness suite in Chromium, Firefox, WebKit, and a module Web Worker
 ```
+
+The two runtime targets install the packed tarball into their own private harness under
+`crates/opportune-wasm/integration/` and run that harness's Vitest suite — golden parity,
+adapters, presets, disposal, structured errors and the loader's initialization states,
+inside the real runtime — rather than re-running the Node suite above.
 
 `make test-wasm` also type-checks every classified `ts` snippet across the documentation and executes the `run`-mode ones (`make test-docs-snippets-ts` runs that lane alone). Its `node --test` suite runs `publint` and `@arethetypeswrong/cli` (`attw`) against the packed tarball, so a manifest or declaration regression fails the lane a consumer would.
 

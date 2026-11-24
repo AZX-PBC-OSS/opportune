@@ -28,7 +28,9 @@ In-house implementations are used only where general-purpose crates carry differ
 
 The `opportune` npm package has zero runtime dependencies: the compiled `.wasm` module and generated TypeScript wrapper ship inside the tarball. Everything listed in `crates/opportune-wasm/js/package.json` (`typescript`, `json-schema-to-typescript`, `publint`, `@arethetypeswrong/cli`, `shell-quote`, `yaml`, and `@types/node`) is a `devDependency` and is omitted from the published tarball. CI installs from the committed `package-lock.json` via `npm ci --ignore-scripts`.
 
-`cargo-deny` covers the Rust crates compiled into the WASM module, while a separate weekly Dependabot lane tracks `/crates/opportune-wasm/js`.
+The two runtime-integration harnesses under `crates/opportune-wasm/integration/{workerd,web}` are private npm projects — `"private": true`, outside `package.json#files`, never published — each with its own committed lockfile: `@cloudflare/vitest-plugin`, `workerd` and Vitest for the Workers lane, and Vitest Browser Mode, `@vitest/browser-playwright`, Playwright, Vite and `esbuild` for the browser lane. `make test-wasm-{workerd,web}` installs both with `--ignore-scripts`, and Playwright's browser binaries arrive through the Playwright CLI rather than a lifecycle script.
+
+`cargo-deny` covers the Rust crates compiled into the WASM module, while three weekly Dependabot npm lanes track `/crates/opportune-wasm/js` (`chore(deps-js)`) and each isolated harness (`chore(deps-workerd)`, `chore(deps-web)`). Note that `cargo-deny` reads the Cargo graph only: no advisory check runs over any of the three npm lockfiles, so those lanes are version bumps and nothing in CI blocks on a published npm advisory.
 
 ## Python dependencies
 

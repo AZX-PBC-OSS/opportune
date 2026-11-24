@@ -113,7 +113,7 @@ The engine runs on **Node 24+**, **Bun 1.4.2+**, **Cloudflare Workers (`workerd`
 - **Cloudflare Workers (`workerd`):** static `.wasm` import compiled by Wrangler (`CompiledWasm` rule in `wrangler.jsonc`) and instantiated lazily on the first engine call, with zero runtime `WebAssembly.compile`. Reuse a single module-scoped `Engine` across requests in the isolate.
 - **Browsers and generic Web Workers (`browser`, `worker`):** call `await init(wasmUrl)` (or `initSync({ module })`) from `opportune/web` once before creating an `Engine`, passing the `.wasm` asset URL (for example `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"` in Vite). Calling the engine before initialization throws `OpportuneError` with code `wasm_unavailable`.
 
-Deno and the deprecated Next.js Edge runtime (`edge-light`) are untested and not claimed; see [`docs/wasm.md`](https://azx-pbc-oss.github.io/opportune/wasm/) for the full runtime contract and non-claims.
+Deno, the deprecated Next.js Edge runtime (`edge-light`), and browser engines beyond the Chromium, Firefox, and WebKit test matrix are untested and not claimed; see [`docs/wasm.md`](https://azx-pbc-oss.github.io/opportune/wasm/) for the full runtime contract and non-claims.
 
 A Cloudflare Worker compiles the module in its bundle (Wrangler `CompiledWasm`), and one module-scoped `Engine` serves every request in the isolate:
 

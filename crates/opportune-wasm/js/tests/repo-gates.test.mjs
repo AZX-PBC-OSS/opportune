@@ -46,6 +46,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import {
   cpSync,
   existsSync,
@@ -63,6 +64,9 @@ import { dirname, join, resolve, sep } from "node:path";
 import test from "node:test";
 import shellQuote from "shell-quote";
 import { parse as parseYaml } from "yaml";
+
+/** The TypeScript parser the package already installs for its build and module-graph gates. */
+const TS = createRequire(import.meta.url)("typescript");
 
 /** This suite sits at `crates/opportune-wasm/js/tests`, so the root is four levels up. */
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
@@ -123,7 +127,7 @@ function harnessFiles(dir = join(ROOT, INTEGRATION), prefix = INTEGRATION) {
         const generated = ["node_modules", "dist", "test-results", "playwright-report"].includes(entry.name) || entry.name.startsWith(".");
         return generated ? [] : harnessFiles(join(dir, entry.name), path);
       }
-      return entry.name === "package.json" || /(?:^Makefile$|\.(?:sh|[cm]?[jt]s|ya?ml)$)/.test(entry.name)
+      return entry.name === "package.json" || /(?:^Makefile$|\.(?:sh|[cm]?[jt]sx?|ya?ml)$)/.test(entry.name)
         ? [path]
         : [];
     })
@@ -173,7 +177,9 @@ function shellCommands(script) {
         }
         continue;
       }
-      // A variable (`$NPM`) or a glob is a word with no literal value to read.
+      // A variable (`$NPM`, which shell-quote leaves blank when unset) is a word with
+      // no literal value to read; a glob reaches the parser as an `op` token and is
+      // dropped above, so neither contributes a word to judge here.
       commands.at(-1).push("");
     }
     return commands.filter((words) => words.length > 0);
@@ -191,14 +197,20 @@ function runsNpmInstall(words) {
   return /\bnpm\b/.test(command) && /\b(ci|install|i)\b/.test(command);
 }
 
-/** Whether a variable command name hides an installing subcommand after any assignments. */
+/** Whether a variable command name hides an installing subcommand, including behind a shell wrapper. */
 function runsDynamicInstall(words) {
   if (/\bnpm\b/.test(words.join(" "))) return false;
-  const executable = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
-  return (
-    words[executable] === "" &&
-    /\b(ci|install|i)\b/.test(words.slice(executable + 1).join(" "))
-  );
+  // Only a dynamic word in command position installs something: `command $NPM ci` and
+  // `env $NPM ci` put a pass-through wrapper in front of it, so the first word after
+  // the leading assignments decides. A dynamic word in argument position (`grep -q
+  // $PATTERN ci.yml`, `tar -xzf "$ARCHIVE" -C /tmp/install`) is data, not a command —
+  // flagging it would fail every ordinary workflow step that interpolates a value.
+  const first = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+  const wrappers = new Set(["command", "env", "exec", "nice", "nohup", "time", "timeout", "sudo"]);
+  const dynamic =
+    words[first] === "" ||
+    (wrappers.has(words[first] ?? "") && words.slice(first + 1).includes(""));
+  return dynamic && /\b(ci|install|i)\b/.test(words.slice(first + 1).join(" "));
 }
 
 /** Whether one literal npm invocation owns the options in `words`. */
@@ -234,9 +246,49 @@ function markdownScripts(file, content) {
   return makefileScripts(file, content);
 }
 
-/** A source file a shell command is spawned from: every line is its own command text. */
+/** A source file a shell command is spawned from, with multiline calls reassembled. */
 function sourceScripts(file, content) {
-  return content.split(/\r?\n/).map((text, index) => ({ file, line: index + 1, text }));
+  const scripts = content.split(/\r?\n/).map((text, index) => ({ file, line: index + 1, text }));
+  if (!/\.[cm]?[jt]sx?$/.test(file)) return scripts;
+
+  // A formatter wraps long argument lists across lines, and a wrapped
+  // `spawnSync(⏎"npm",⏎["ci"],⏎)` is one call that no single line of it names whole.
+  // The TypeScript parser owns strings, comments and nesting; counting brackets in raw
+  // text would let a comment such as `// ))` end the call early. Keep each physical line
+  // as a fallback for indirect commands, and add each outermost multiline call, printed
+  // without comments, at its starting line. One-line calls are already complete there.
+  const source = TS.createSourceFile(
+    file,
+    content,
+    TS.ScriptTarget.ESNext,
+    true,
+    /\.tsx$/.test(file)
+      ? TS.ScriptKind.TSX
+      : /\.jsx$/.test(file)
+        ? TS.ScriptKind.JSX
+        : /\.[cm]?ts$/.test(file)
+          ? TS.ScriptKind.TS
+          : TS.ScriptKind.JS,
+  );
+  const printer = TS.createPrinter({ removeComments: true });
+  const visit = (node) => {
+    if (!TS.isCallExpression(node)) {
+      node.forEachChild(visit);
+      return;
+    }
+    const start = source.getLineAndCharacterOfPosition(node.getStart(source));
+    const end = source.getLineAndCharacterOfPosition(Math.max(node.getStart(source), node.end - 1));
+    if (end.line > start.line) {
+      const printed = printer
+        .printNode(TS.EmitHint.Unspecified, node, source)
+        .replace(/\s*\r?\n\s*/g, " ");
+      const unit = scripts[start.line];
+      unit.text = `${unit.text.slice(0, start.character)}${printed}`;
+    }
+    // The outermost call's text includes every nested call, so do not add duplicates.
+  };
+  visit(source);
+  return scripts;
 }
 
 /** A Makefile's recipe lines, joined across shell continuations. */
@@ -638,6 +690,50 @@ test("the npm-install gate reads TypeScript harness entry points", () => {
   assert.equal(offenders.length, 1, "a TypeScript harness install has no --ignore-scripts");
 });
 
+test("the npm-install gate reads JSX and TSX harness entry points", () => {
+  const root = mkdtempSync(join(tmpdir(), "opportune-harness-jsx-"));
+  try {
+    for (const extension of ["jsx", "tsx"]) {
+      const source = [
+        "const view = <div />;",
+        "spawnSync(",
+        '  "npm",',
+        '  ["ci"],',
+        ");",
+        "",
+      ].join("\n");
+      writeFileSync(join(root, `fixture.${extension}`), source);
+      const file = `${INTEGRATION}/web/fixture.${extension}`;
+      assert.ok(
+        harnessFiles(root, `${INTEGRATION}/web`).includes(file),
+        `the harness walk excludes .${extension} source`,
+      );
+      const { offenders } = npmInstalls([[file, source]]);
+      assert.equal(offenders.length, 1, `a multiline .${extension} install has no --ignore-scripts`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a multiline JavaScript spawn cannot hide an npm install", () => {
+  for (const comment of [undefined, "  // ))"]) {
+    const source = [
+      'const result = spawnSync(',
+      '  "npm",',
+      '  [',
+      ...(comment === undefined ? [] : [comment]),
+      '    "ci",',
+      '  ],',
+      ');',
+      "",
+    ].join("\n");
+    const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);
+    assert.equal(installs.length, 1, "the formatter's line breaks hid the npm invocation");
+    assert.equal(offenders.length, 1, "the multiline spawn has no --ignore-scripts");
+  }
+});
+
 test("the npm-install gate reads package scripts, not manifest prose", () => {
   const manifest = JSON.stringify({
     description: "npm install in prose is not a command",
@@ -720,6 +816,44 @@ test("a dynamic install cannot hide beside a flagged literal install", () => {
   ].join("\n");
   const { offenders } = npmInstalls([["ci.yml", content]]);
   assert.equal(offenders.length, 1, "the variable invocation inherits neither npm's name nor the literal install's flag");
+});
+
+test("a shell wrapper cannot hide a dynamic npm install", () => {
+  for (const command of [
+    "command $NPM install left-pad",
+    "env $NPM ci",
+  ]) {
+    const content = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      `      - run: ${JSON.stringify(command)}`,
+      "",
+    ].join("\n");
+    const { installs, offenders } = npmInstalls([["ci.yml", content]]);
+    assert.equal(installs.length, 1, `${command} was not read as an install`);
+    assert.equal(offenders.length, 1, `${command} ran without --ignore-scripts`);
+  }
+});
+
+test("a dynamic word in argument position is data, not an install", () => {
+  // The interpellation cases a gate-by-substring would fail: the dynamic word names a
+  // value, and the installing-looking word is a path or argument beside it.
+  for (const command of [
+    "grep -q $PATTERN ci.yml",
+    "tar -xzf $ARCHIVE -C /tmp/install",
+    "git diff --name-only $BASE ci.yml",
+  ]) {
+    const content = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      `      - run: ${JSON.stringify(command)}`,
+      "",
+    ].join("\n");
+    const { installs, offenders } = npmInstalls([["ci.yml", content]]);
+    assert.equal(installs.length, 0, `${command} was read as an npm install`);
+  }
 });
 
 test("a shell comment cannot hide installs on following lines", () => {

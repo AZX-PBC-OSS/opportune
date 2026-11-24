@@ -192,3 +192,24 @@ test("the npm package's README is one of the pages the gate reads", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("both runtime pages bound what the browser claim covers", () => {
+  // `make test-wasm-web` drives Chromium, Firefox and WebKit, so a page claiming
+  // "browsers" without bounding it to those engines promises runtimes nothing here ever
+  // ran. No other gate reads this prose: `make check-docs` builds the page and the
+  // snippet lane compiles its `ts` fences, so a non-claim dropped in a rewrite is
+  // silent. This pins the contract rather than the sentence shape — the one line that
+  // marks the runtimes unclaimed has to name all three, and the page has to name the
+  // engines that bound the browser half of it.
+  for (const page of ["docs/wasm.md", "crates/opportune-wasm/js/README.md"]) {
+    const text = readFileSync(join(ROOT, page), "utf8");
+    const unclaimed = text.split(/\r?\n/).filter((line) => /untested and not claimed/i.test(line));
+    assert.equal(unclaimed.length, 1, `${page} carries ${unclaimed.length} non-claim lines; expected one`);
+    for (const runtime of ["Deno", "edge-light", "browser"]) {
+      assert.match(unclaimed[0], new RegExp(runtime, "i"), `${page}'s non-claim drops ${runtime}`);
+    }
+    for (const engine of ["Chromium", "Firefox", "WebKit"]) {
+      assert.match(text, new RegExp(engine), `${page} does not name ${engine} among the tested browsers`);
+    }
+  }
+});
