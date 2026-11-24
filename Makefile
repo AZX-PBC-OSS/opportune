@@ -456,9 +456,15 @@ test-wasm-workerd: $(if $(WORKERD_TARBALL),,wasm)
 
 # Browsers and generic Web Workers: Vitest Browser Mode with Playwright drives Chromium,
 # Firefox, WebKit, and a real module Web Worker against the packed tarball. Browsers are
-# installed by the Playwright CLI, never by an npm lifecycle script.
+# installed by the Playwright CLI, never by an npm lifecycle script. The override is the
+# same comma-separated set `integration/web/vitest.config.ts` splits; the CLI takes it
+# space-separated, so a narrowed run installs exactly the browsers it will start. The
+# default is the three engines the suite names.
 WEB := crates/opportune-wasm/integration/web
 WEB_TARBALL ?=
+WEB_BROWSERS := chromium firefox webkit
+WEB_PLAYWRIGHT_BROWSERS := $(strip $(subst $(comma), ,$(OPPORTUNE_WEB_BROWSERS)))
+WEB_PLAYWRIGHT_BROWSERS := $(if $(WEB_PLAYWRIGHT_BROWSERS),$(WEB_PLAYWRIGHT_BROWSERS),$(WEB_BROWSERS))
 
 test-wasm-web: $(if $(WEB_TARBALL),,wasm)
 	@set -e; dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
@@ -470,7 +476,7 @@ test-wasm-web: $(if $(WEB_TARBALL),,wasm)
 	fi; \
 	npm install --prefix $(WEB) --no-save --ignore-scripts --offline \
 		--no-audit --no-fund --silent "$$tarball"; \
-	cd $(WEB) && ./node_modules/.bin/playwright install --with-deps chromium firefox webkit && \
+	cd $(WEB) && ./node_modules/.bin/playwright install --with-deps $(WEB_PLAYWRIGHT_BROWSERS) && \
 		npm test
 
 # The Python and TypeScript code the documentation shows is a claim the gate checks

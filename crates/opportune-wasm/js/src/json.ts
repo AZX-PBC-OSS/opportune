@@ -32,10 +32,14 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
  * anything else.
  *
  * A mapping is an object literal, one read back from a document, or one built with
- * `Object.create(null)` to keep a caller's own `__proto__` key as a key. Every other
- * object has a prototype of its own — a `Date`, a `RegExp`, an instance of a class —
- * and none of its own enumerable members are the keys a caller meant, so a value read
- * as one is a mapping of no keys rather than the mistake it is.
+ * `Object.create(null)` to keep a caller's own `__proto__` key as a key. The test is
+ * the shape of the prototype chain rather than identity with this realm's
+ * `Object.prototype`: a browser iframe or a Node `vm` context has a different
+ * `Object.prototype`, and its object literals are mappings too, which `JSON.stringify`
+ * writes exactly as it writes this realm's. Every other object has a prototype of its
+ * own — a `Date`, a `RegExp`, an instance of a class — and none of its own enumerable
+ * members are the keys a caller meant, so a value read as one is a mapping of no keys
+ * rather than the mistake it is.
  */
 export function asPlainRecord(value: unknown): Record<string, unknown> | undefined {
   const record = asRecord(value);
@@ -43,7 +47,13 @@ export function asPlainRecord(value: unknown): Record<string, unknown> | undefin
     return undefined;
   }
   const prototype = Object.getPrototypeOf(record);
-  return prototype === Object.prototype || prototype === null ? record : undefined;
+  if (prototype === null) {
+    return record;
+  }
+  // A plain object's prototype is some realm's `Object.prototype`, whose own prototype
+  // is `null`. A class instance's prototype chain is one level deeper, so it is still
+  // refused.
+  return Object.getPrototypeOf(prototype) === null ? record : undefined;
 }
 
 /**
@@ -127,6 +137,60 @@ function finite(what: string): (this: unknown, key: string, value: unknown) => u
     }
     return value;
   };
+}
+
+/**
+ * `value`, or the rejection a selector the wire writes as no selector raises.
+ *
+ * A selector member has to survive `JSON.stringify` as something the wire reads: `true`,
+ * `false`, `null`, or an object with at least one member. Three spellings are not one, and
+ * each is silent — the field reaches the engine as if the caller had left it out, so a
+ * rule's `who` becomes its own `{ role: "host" }` default and its `when` every booking:
+ *
+ * - a function or a symbol, which `JSON.stringify` drops, so the member is gone;
+ * - `{}`, which a `Map`, a `Set`, a `RegExp` or an empty plain object is written as,
+ *   because none of them carries a member the wire can read;
+ * - `null` or no value at all, which an invalid `Date` or an object whose `toJSON` answers
+ *   that way is written as — `who: null` is the wire's default, not a selector.
+ *
+ * The spelling decides, not the type or its keys: a class instance whose own fields the
+ * wire can read is those members and stays a selector, `new Boolean(true)` spells `true`,
+ * and an object with a `toJSON` is whatever that returns. Every other malformed selector
+ * survives as itself — a string, a number, an array, or the `null` a dropped list member
+ * becomes — so the engine rejects it at the field the caller wrote, with its pointer.
+ *
+ * @param value the selector the caller supplied.
+ * @param what the argument being read, named in the message — `who`, `when`, `selector`.
+ * @throws OpportuneError with code `invalid_type` when `value` is a function or a symbol,
+ *   or an object whose JSON spelling is `{}`, `null` or no value.
+ */
+export function assertCarryable(value: unknown, what: string): void {
+  if (typeof value === "function" || typeof value === "symbol") {
+    throw rejection(
+      "invalid_type",
+      `\`${what}\` is a selector the wire can carry, not a value of type ${typeName(value)}`,
+    );
+  }
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+  let spelled: string | undefined;
+  try {
+    spelled = JSON.stringify(value);
+  } catch {
+    // A value with no JSON spelling at all is the document writer's to report, at the
+    // field it sits under: this check is about a selector the wire writes as none, not
+    // about a document that cannot be written.
+    return;
+  }
+  if (spelled === "{}" || spelled === "null" || spelled === undefined) {
+    throw rejection(
+      "invalid_type",
+      `\`${what}\` is a selector the wire can carry, not a value of type ${typeName(value)} ` +
+        `whose JSON spelling is \`${spelled ?? "nothing"}\`: the engine would read the ` +
+        "field's own default instead",
+    );
+  }
 }
 
 /**

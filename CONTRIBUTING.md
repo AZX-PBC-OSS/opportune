@@ -49,7 +49,7 @@ make docs-serve        # live-reload preview of the documentation site
 
 ### Slow Verification Targets
 
-- `make test-wasm-workerd` builds the packed tarball into `crates/opportune-wasm/integration/workerd` and runs its Vitest suite inside real Cloudflare `workerd` via `@cloudflare/vitest-plugin`, proving the `CompiledWasm` bundle path a Worker deployment uses (local `workerd`, so no Cloudflare account or network).
+- `make test-wasm-workerd` installs the packed tarball into `crates/opportune-wasm/integration/workerd` and runs its Vitest suite inside real Cloudflare `workerd` via `@cloudflare/vitest-plugin`, proving the package's `workerd` loader against a precompiled static `.wasm` import (local `workerd`, so no Cloudflare account or network). The deployment-time Wrangler `CompiledWasm` rule is not exercised: the Vitest plugin compiles `.wasm` itself.
 - `make test-wasm-web` installs Playwright's Chromium, Firefox, and WebKit and runs Vitest Browser Mode against the packed tarball, plus a real module Web Worker bundle. Override the browser set with `OPPORTUNE_WEB_BROWSERS=chromium`.
 - `make determinism` runs the scenario suite in two separate OS processes and compares canonical output byte-for-byte (CI gates on this in addition to the in-suite check).
 - `make stress` runs ~50,000 generated engine-vs.-oracle comparisons spanning every rule kind, multi-participant matching, caps, occurrences, rest, zone periods, and daylight-saving transitions.
@@ -75,7 +75,7 @@ make check     # lint, tests, feature matrix, and docs
 make deny      # license, advisory, ban, and source policy
 ```
 
-CI additionally checks the Bun test lane, the Cloudflare `workerd` and browser/Web Worker WASM lanes (`make test-wasm-workerd`, `make test-wasm-web`), two-process `make determinism`, MSRV builds, and wheel/sdist packaging.
+CI additionally checks the Bun test lane, the Cloudflare `workerd` and browser/module Web Worker WASM lanes (`make test-wasm-workerd`, `make test-wasm-web`), two-process `make determinism`, MSRV builds, and wheel/sdist packaging.
 
 ### Pull Request Titles (Conventional Commits)
 

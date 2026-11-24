@@ -1,12 +1,12 @@
 # opportune (npm)
 
-Availability scheduling for Node, Bun, Cloudflare Workers, browsers and generic Web Workers: the [`opportune`](https://github.com/AZX-PBC-OSS/opportune) engine — the same core exposed by the Rust and Python packages — compiled to WebAssembly and wrapped in a strict TypeScript surface. The IANA time zone database is bundled inside the module, so calls need no native toolchain and no `TZif` files on disk.
+Availability scheduling for Node, Bun, Cloudflare Workers, browsers and module Web Workers: the [`opportune`](https://github.com/AZX-PBC-OSS/opportune) engine — the same core exposed by the Rust and Python packages — compiled to WebAssembly and wrapped in a strict TypeScript surface. The IANA time zone database is bundled inside the module, so calls need no native toolchain and no `TZif` files on disk.
 
 ```sh
 npm install opportune
 ```
 
-Requires Node 24+ or Bun 1.4.2+, or a Cloudflare Worker, a browser or a generic Web Worker. Node, Bun and Cloudflare Workers load the module themselves; a browser or Web Worker calls `init()` from `opportune/web` first — see [Runtimes](#runtimes).
+Requires Node 24+ or Bun 1.4.2+, or a Cloudflare Worker, a browser or a module Web Worker. Node, Bun and Cloudflare Workers load the module themselves; a browser or module Web Worker calls `init()` from `opportune/web` first — see [Runtimes](#runtimes).
 
 ## Quickstart: one person, one meeting
 
@@ -96,10 +96,10 @@ process, and share one engine per worker rather than building one per request.
 ## Subpaths
 
 - `opportune` — engine, presets, sugar helpers, and generated TypeScript types.
-- `opportune/presets` — pure TypeScript rule/goal/offer builders, `OpportuneError`, `httpStatusForError`, `isKnownStatus`, the open unions, `publicResponse`/`publicSlotCheck`, `VERSION`, marker constants, and generated types. Loads no WebAssembly and no `node:` modules — safe for browser, Web Worker, and client component bundles.
+- `opportune/presets` — pure TypeScript rule/goal/offer builders, `OpportuneError`, `httpStatusForError`, `isKnownStatus`, the open unions, `publicResponse`/`publicSlotCheck`, `VERSION`, marker constants, and generated types. Loads no WebAssembly and no `node:` modules — safe for browser, module Web Worker, and client component bundles.
 - `opportune/adapters/graph` — Microsoft Graph `calendarView`, `getSchedule`, and `workingHours` conversions.
 - `opportune/adapters/google` — Google Calendar `events.list` and `freeBusy.query` conversions.
-- `opportune/web` — explicit WASM initializer (`init`, `initSync`) for browsers and generic Web Workers.
+- `opportune/web` — explicit WASM initializer (`init`, `initSync`) for browsers and module Web Workers.
 - `opportune/opportune_wasm_bg.wasm` — the compiled WebAssembly binary for bundlers or CDNs serving it to `init(...)`.
 - `opportune/schema.json` — the Draft 2020-12 JSON Schema the generated types derive from, exported directly from the package for consumers that validate a document before sending it. Read it with `import schema from "opportune/schema.json" with { type: "json" }` or `require("opportune/schema.json")`; `make check-codegen-ts` drift-checks it against the Rust export.
 
@@ -107,11 +107,11 @@ Provider conversions return an `unavailable` outcome for errored calendars inste
 
 ## Runtimes
 
-The engine runs on **Node 24+**, **Bun 1.4.2+**, **Cloudflare Workers (`workerd`)**, **browsers**, and **Web Workers** — all backed by one `.wasm` binary selected through `package.json#imports["#wasm"]`:
+The engine runs on **Node 24+**, **Bun 1.4.2+**, **Cloudflare Workers (`workerd`)**, **browsers**, and **module Web Workers** — all backed by one `.wasm` binary selected through `package.json#imports["#wasm"]`:
 
 - **Node 24+ / Bun 1.4.2+ (`node`, `default`):** lazy synchronous load from disk on the first engine call (works with both ESM `import` and CommonJS `require("opportune")`).
 - **Cloudflare Workers (`workerd`):** static `.wasm` import compiled by Wrangler (`CompiledWasm` rule in `wrangler.jsonc`) and instantiated lazily on the first engine call, with zero runtime `WebAssembly.compile`. Reuse a single module-scoped `Engine` across requests in the isolate.
-- **Browsers and generic Web Workers (`browser`, `worker`):** call `await init(wasmUrl)` (or `initSync({ module })`) from `opportune/web` once before creating an `Engine`, passing the `.wasm` asset URL (for example `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"` in Vite). Calling the engine before initialization throws `OpportuneError` with code `wasm_unavailable`.
+- **Browsers and module Web Workers (`browser`, `worker`):** call `await init(wasmUrl)` (or `initSync({ module })`) from `opportune/web` once before creating an `Engine`, passing the `.wasm` asset URL (for example `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"` in Vite). Calling the engine before initialization throws `OpportuneError` with code `wasm_unavailable`.
 
 Deno, the deprecated Next.js Edge runtime (`edge-light`), and browser engines beyond the Chromium, Firefox, and WebKit test matrix are untested and not claimed; see [`docs/wasm.md`](https://azx-pbc-oss.github.io/opportune/wasm/) for the full runtime contract and non-claims.
 
@@ -137,13 +137,14 @@ export default {
 };
 ```
 
-A browser or Web Worker initializes the packaged module before its first engine call:
+A browser or module Web Worker initializes the packaged module before its first engine call:
 
 ```js
 import { Engine } from "opportune";
 import { init } from "opportune/web";
+// Vite: resolve the package's .wasm as an asset URL.
+import wasmUrl from "opportune/opportune_wasm_bg.wasm?url";
 
-const wasmUrl = new URL("/opportune_wasm_bg.wasm", import.meta.url);
 await init(wasmUrl);
 
 const engine = new Engine();

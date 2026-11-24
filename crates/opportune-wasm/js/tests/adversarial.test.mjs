@@ -623,6 +623,57 @@ test("a non-finite number is a rejection, never the `null` JSON writes", () => {
   );
 });
 
+test("limits JSON would write as `{}` are refused, not answered with the defaults", () => {
+  // Every field of a limits document is optional, so `{}` is a document the wire reads
+  // as "all defaults". A `Map`, a `Set`, an instance of a class and an object whose
+  // fields are on its prototype carry no own enumerable member, so `JSON.stringify`
+  // writes exactly that — and the engine would run with none of the limits the caller
+  // asked for. The plain object is the control: with the same field on the document
+  // itself, the one participant over the bound *is* refused.
+  const request = {
+    ...REQUEST,
+    goal: singleGoal("30m", { all: [person("rich"), person("ana")] }, {
+      zone: "Europe/London",
+      searchWindow: ["2027-06-13T23:00Z", "2027-06-18T23:00Z"],
+    }),
+    participants: [
+      { id: "rich", zone: "Europe/London", calendar: [] },
+      { id: "ana", zone: "Europe/London", calendar: [] },
+    ],
+  };
+  using bounded = new Engine({ max_participants: 1 });
+  const limited = thrown(() => bounded.findAvailability(request));
+  assert.ok(limited instanceof OpportuneError, `the bounded engine answered: ${limited?.message}`);
+  assert.equal(limited.code, "invalid_request");
+  assert.ok(
+    limited.errors.some((finding) => finding.code === "participants_limit"),
+    `the plain limits document did not bound the request: ${JSON.stringify(limited.errors)}`,
+  );
+
+  const refused = [
+    ["a Map", new Map([["max_participants", 1]]), "map"],
+    ["a Set", new Set(["max_participants"]), "set"],
+    ["an instance of a class", new (class Limits {})(), "limits"],
+    ["a prototype-carried field", Object.create({ max_participants: 1 }), "object"],
+  ];
+  for (const [what, limits, named] of refused) {
+    // `invalid_limits` is the code `Engine` documents, and it is the existing
+    // configuration translation — not a new one — that turns the shape refusal into it.
+    const error = assertRejection(
+      () => new Engine(limits),
+      "invalid_limits",
+      `not a value of type ${named}`,
+    );
+    assert.equal(error.cause?.code, "invalid_type", what);
+  }
+
+  // The two "no argument" spellings keep meaning the engine's own defaults.
+  using fromNull = new Engine(null);
+  using fromUndefined = new Engine(undefined);
+  assert.match(fromNull.tzdbVersion, /^\d{4}[a-z]$/);
+  assert.match(fromUndefined.tzdbVersion, /^\d{4}[a-z]$/);
+});
+
 test("an offer the accessors cannot read is a rejection, not a TypeError", () => {
   // A lookup that missed, an offer read from a queue and never parsed: the accessors
   // are how an application reads the engine's answer, so a shape they cannot read has

@@ -6,7 +6,7 @@ Calendar availability and scheduling calculations across constraints: determine 
 
 - **Rust:** pure-Rust core crate (`opportune`), JSON wire layer (`opportune-json`), and Microsoft Graph / Google Calendar payload adapters (`opportune-adapters`).
 - **Python:** typed `cp312-abi3` wheel (Python 3.12+) with generated Pydantic v2 models, GIL-releasing engine calls, async helpers, and provider adapters.
-- **TypeScript / JavaScript:** zero-dependency npm package for Node 24+, Bun 1.4.2+, Cloudflare Workers (`workerd`), browsers, and generic Web Workers, backed by WebAssembly (`wasm32`), with generated TypeScript types, presets, and provider adapters.
+- **TypeScript / JavaScript:** zero-dependency npm package for Node 24+, Bun 1.4.2+, Cloudflare Workers (`workerd`), browsers, and module Web Workers, backed by WebAssembly (`wasm32`), with generated TypeScript types, presets, and provider adapters.
 
 ## Capabilities
 
@@ -95,13 +95,13 @@ The compiled extension module `opportune._opportune` shares a single version sou
 
 ### Node, Bun, and other JavaScript runtimes
 
-Install the npm package (Node 24+, Bun 1.4.2+, Cloudflare Workers, browsers, and generic Web Workers):
+Install the npm package (Node 24+, Bun 1.4.2+, Cloudflare Workers, browsers, and module Web Workers):
 
 ```sh
 npm install opportune
 ```
 
-See [WASM and TypeScript](wasm.md) for runtime support, adapter usage, browser and Web Worker presets (`opportune/presets`), and the bundle-size budget.
+See [WASM and TypeScript](wasm.md) for runtime support, adapter usage, browser and module Web Worker presets (`opportune/presets`), and the bundle-size budget.
 
 ### Building from source
 

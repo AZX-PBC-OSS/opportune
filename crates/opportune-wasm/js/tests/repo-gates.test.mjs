@@ -12,14 +12,24 @@
  * real target in a throwaway tree holding copies of the real inputs, so the cases read
  * the committed files for their shape without ever writing to the checkout.
  *
- * The npm half is the privileged half. publish.yml's `publish-npm` holds
- * `id-token: write` and reaches `npm ci` only through the Makefile's `$(JSON2TS)`
- * prerequisite, so `--ignore-scripts` on that recipe is the whole of the guarantee
- * that a dependency cannot run code in that job. Two things make the flag lossless and
- * both are assumptions about files, not code: no dependency in the committed lockfile
- * ships an install script, and the package declares no lifecycle hook of its own. A
- * dependency bump that adds either would not fail anything — it would just start being
- * skipped — so both are asserted.
+ * The npm release path spans two jobs, one on each side of the privilege boundary.
+ * publish.yml's `build-npm` is unprivileged (`contents: read`): it runs
+ * `make test-wasm`, which reaches npm by two routes — the Makefile's `$(JSON2TS)`
+ * prerequisite `npm ci`, and `npm run build`/`npm test`, whose suite packs the tarball
+ * and `npm install`s it into a temporary consumer — and then packs the bytes the release
+ * publishes. `publish-npm` holds `id-token: write` and runs no make target, no test and
+ * no `npm ci`: it downloads that tarball, verifies it, and `npm publish`es it with
+ * `--ignore-scripts`.
+ * `--ignore-scripts` on every install `build-npm` reaches is therefore the guarantee
+ * that a dependency cannot run code in the job that produces the release bytes; the same
+ * property keeps CI's wasm lane, which runs the same target, from executing one. Two
+ * things make the flag lossless and both are assumptions about files, not code: no
+ * dependency in the committed lockfile ships an install script, and the package declares
+ * no lifecycle hook of its own. A dependency bump that adds either would not fail
+ * anything — it would just start being skipped — so both are asserted. The install sites
+ * themselves are read from the files the release build executes: the Makefile, the
+ * workflows, the manifest, the package's own `bin/`, `scripts/` and `tests/`, and the
+ * runtime harnesses.
  *
  * The last group pins the wiring, which is invisible to every executable check: the
  * export step uv needs before it compiles the extension outside the checkout, the two
@@ -142,6 +152,59 @@ function harnessFiles(dir = join(ROOT, INTEGRATION), prefix = INTEGRATION) {
     .sort();
 }
 
+/** The package's own executable trees: what `npm run build`, `npm test` and the scripts run. */
+const PACKAGE_SOURCE_TREES = ["bin", "scripts", "tests"];
+
+/**
+ * Every executable source of the npm package that an npm install could be written into.
+ *
+ * `build-npm` does not reach npm only through the Makefile: `make test-wasm` runs
+ * `npm run build` (which executes `bin/clean.mjs` and `bin/bundle-module.mjs`),
+ * `npm test` (`node --test tests/`), and `scripts/check-wasm-size.mjs`; the suite
+ * `npm test` drives spawns `npm install` of the packed tarball. A gate that read only
+ * the Makefile and the manifest would leave the files the release build actually
+ * executes outside the one rule the scanner exists to enforce. `publish-npm` runs none
+ * of these — it downloads, verifies and publishes the tarball `build-npm` produced.
+ *
+ * Generated, dependency and scratch trees are skipped: `dist/`, `pkg/` and `pkg-node/`
+ * are build output, `node_modules/` is an install, and the suites write
+ * `.top-level-using-*` and `.doc-snippets-*` beside the sources. Lockfiles are data and
+ * are not read. A manifest is included for its `scripts`, which npm hands to a shell.
+ */
+function packageFiles(dir = JS_PACKAGE, prefix = "crates/opportune-wasm/js") {
+  const generated = new Set([
+    "node_modules",
+    "dist",
+    "pkg",
+    "pkg-node",
+    ".git",
+    "test-results",
+    "playwright-report",
+    ".wrangler",
+    ".vitest",
+  ]);
+  const scratch = /^\.(?:doc-snippets|top-level-using)-/;
+  const walk = (at, path) => {
+    if (!existsSync(at)) {
+      return [];
+    }
+    return readdirSync(at, { withFileTypes: true }).flatMap((entry) => {
+      const nested = `${path}/${entry.name}`;
+      if (entry.isDirectory()) {
+        return generated.has(entry.name) || scratch.test(entry.name)
+          ? []
+          : walk(join(at, entry.name), nested);
+      }
+      return entry.name === "package.json" || /\.(?:sh|[cm]?[jt]sx?)$/.test(entry.name)
+        ? [nested]
+        : [];
+    });
+  };
+  return PACKAGE_SOURCE_TREES
+    .flatMap((name) => walk(join(dir, name), `${prefix}/${name}`))
+    .sort();
+}
+
 /** Shell control operators that finish one command and can begin another. */
 const COMMAND_SEPARATORS = new Set([";", ";;", ";&", ";;&", "&", "&&", "||", "|", "|&"]);
 
@@ -223,13 +286,186 @@ function lastIgnoreScriptsOption(words) {
 /** A word that invokes npm, including an absolute or relative executable path. */
 const NPM_COMMAND = /^(?:.*\/)?npm(?:\.(?:cjs|cmd|exe))?$/;
 
-/** Whether `words` invoke npm with one of its installing subcommands. */
+/** A leading shell assignment, which precedes the command rather than naming it. */
+const SHELL_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * Words that leave the word after them in command position.
+ *
+ * These are the wrappers the dynamic-install check already understands, the shell and
+ * `eval` interpreters, and the shell reserved words that introduce a simple command
+ * (`if npm ci`, `then npm ci`, `! npm ci`). The interpreters matter because the
+ * shell-token split below turns `sh -c "npm ci"` into the words the interpreter runs;
+ * without them the split would name a command the position check could not follow.
+ */
+const SHELL_WRAPPERS = new Set([
+  "command",
+  "env",
+  "nice",
+  "nohup",
+  "time",
+  "timeout",
+  "sudo",
+  "eval",
+  "sh",
+  "bash",
+  "dash",
+  "zsh",
+  "ash",
+  "if",
+  "then",
+  "else",
+  "elif",
+  "while",
+  "until",
+  "do",
+  "!",
+  "{",
+]);
+
+/**
+ * npm's other commands: a word that is one of these is npm's subcommand, so an
+ * `install` word after it is that command's argument, not an install.
+ *
+ * `npm run install`, `npm test install` and `npm publish install` each name a script or
+ * an argument; treating the later word as a subcommand was the false positive here. The
+ * set is npm's own vocabulary only. An omission cannot hide an install — the scan keeps
+ * looking past a word it cannot place, and the mistake is a false positive that blocks a
+ * pull request — while a wrong entry would hide one, so only real npm commands belong
+ * here. The installing aliases are deliberately absent.
+ */
+const NON_INSTALL_SUBCOMMANDS = new Set([
+  "access",
+  "adduser",
+  "audit",
+  "bin",
+  "bugs",
+  "cache",
+  "cert",
+  "completion",
+  "config",
+  "create",
+  "dedupe",
+  "deprecate",
+  "diff",
+  "dist-tag",
+  "docs",
+  "doctor",
+  "edit",
+  "exec",
+  "explain",
+  "explore",
+  "find-dupes",
+  "fund",
+  "get",
+  "help",
+  "home",
+  "hook",
+  "init",
+  "link",
+  "list",
+  "ll",
+  "la",
+  "login",
+  "logout",
+  "ls",
+  "outdated",
+  "owner",
+  "pack",
+  "ping",
+  "pkg",
+  "prefix",
+  "profile",
+  "prune",
+  "publish",
+  "query",
+  "rebuild",
+  "remove",
+  "repo",
+  "restart",
+  "root",
+  "run",
+  "run-script",
+  "search",
+  "set",
+  "sbom",
+  "shrinkwrap",
+  "star",
+  "stars",
+  "start",
+  "stop",
+  "t",
+  "team",
+  "test",
+  "token",
+  "un",
+  "uninstall",
+  "unlink",
+  "unpublish",
+  "unstar",
+  "up",
+  "update",
+  "version",
+  "view",
+  "whoami",
+  "why",
+  "x",
+]);
+
+/**
+ * Whether `words[index]` is the command the shell would run.
+ *
+ * The command is the first word that is not a leading assignment, or a word after one
+ * of the pass-through wrappers. A word in argument position — `echo npm install`,
+ * `grep -r npm install docs/` — is data, not a command.
+ */
+function inCommandPosition(words, index) {
+  const first = words.findIndex((word) => !SHELL_ASSIGNMENT.test(word));
+  if (first === -1) {
+    return false;
+  }
+  if (index === first) {
+    return true;
+  }
+  return SHELL_WRAPPERS.has(words[first]) && index > first;
+}
+
+/**
+ * Whether npm's own subcommand is one of its installing aliases.
+ *
+ * npm's grammar is `npm [options] <command> [arguments]`, so the first word after npm
+ * that this scanner can place decides: an option is skipped, a value or path it cannot
+ * place is passed over, and the first install alias or other command word ends the
+ * question. `npm --prefix dir ci` therefore installs; `npm run install` does not.
+ */
+function npmCommandIsInstall(words, npmAt) {
+  for (const word of words.slice(npmAt + 1)) {
+    if (word === "" || word.startsWith("-")) {
+      continue;
+    }
+    if (INSTALL_SUBCOMMAND.test(word)) {
+      return true;
+    }
+    if (NON_INSTALL_SUBCOMMANDS.has(word)) {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether `words` invoke npm with one of its installing subcommands.
+ *
+ * npm is judged only in command position: `echo npm install` and `grep -r npm install
+ * docs/` name npm as data, and `npm run install` names a script. Filenames
+ * (`install.js`), eval strings and shell's `in` keyword are arguments, not npm aliases.
+ */
 function runsNpmInstall(words) {
-  // Associate an exact subcommand with an npm command word. Filenames (`install.js`),
-  // eval strings and shell's `in` keyword are arguments, not npm install aliases.
-  return words.some((word, index) =>
-    NPM_COMMAND.test(word) &&
-    words.slice(index + 1).some((argument) => INSTALL_SUBCOMMAND.test(argument))
+  return words.some(
+    (word, index) =>
+      NPM_COMMAND.test(word) &&
+      inCommandPosition(words, index) &&
+      npmCommandIsInstall(words, index),
   );
 }
 
@@ -244,11 +480,10 @@ function runsDynamicInstall(words) {
   // the leading assignments decides. A dynamic word in argument position (`grep -q
   // $PATTERN ci.yml`, `tar -xzf "$ARCHIVE" -C /tmp/install`) is data, not a command —
   // flagging it would fail every ordinary workflow step that interpolates a value.
-  const first = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
-  const wrappers = new Set(["command", "env", "nice", "nohup", "time", "timeout", "sudo"]);
+  const first = words.findIndex((word) => !SHELL_ASSIGNMENT.test(word));
   const dynamic =
     words[first] === "" ||
-    (wrappers.has(words[first] ?? "") && words.slice(first + 1).includes(""));
+    (SHELL_WRAPPERS.has(words[first] ?? "") && words.slice(first + 1).includes(""));
   return dynamic && words.slice(first + 1).some((word) => INSTALL_SUBCOMMAND.test(word));
 }
 
@@ -282,6 +517,7 @@ function packageScripts(file, content) {
 
 /** A Markdown page's shell text: fenced code holds recipes whose continuations join. */
 function markdownScripts(file, content) {
+  // No recipe-modifier stripping: a fence is shell source, not Makefile syntax.
   return makefileScripts(file, content);
 }
 
@@ -453,8 +689,24 @@ function sourceScripts(file, content) {
   return scripts;
 }
 
-/** A Makefile's recipe lines, joined across shell continuations. */
-function makefileScripts(file, content) {
+/**
+ * `text` with GNU make's recipe modifiers removed from the command's start.
+ *
+ * `@` suppresses echo, `-` ignores a non-zero exit and `+` runs the line even under
+ * `-n`; make takes them off before handing the line to the shell. They are recipe syntax
+ * only — a shell line beginning `@npm` names a command called `@npm` — so only the
+ * Makefile caller asks for this.
+ */
+const recipeText = (text) => text.replace(/^(\s*)[-+@]+/, "$1");
+
+/**
+ * A Makefile's recipe lines, joined across shell continuations.
+ *
+ * `recipeModifiers` is for a Makefile only. A Markdown fenced shell block shares the
+ * continuation join (see {@link markdownScripts}) but is not a recipe, so it keeps its
+ * `@`/`-`/`+` exactly as the shell would see them.
+ */
+function makefileScripts(file, content, recipeModifiers = false) {
   const units = [];
   let current;
   for (const [index, raw] of content.split("\n").entries()) {
@@ -471,7 +723,9 @@ function makefileScripts(file, content) {
     current = undefined;
   }
   if (current !== undefined) units.push(current);
-  return units;
+  return recipeModifiers
+    ? units.map((unit) => ({ ...unit, text: recipeText(unit.text) }))
+    : units;
 }
 
 /**
@@ -498,7 +752,7 @@ function npmInstalls(files) {
       : /\.ya?ml$/.test(file)
         ? workflowScripts(file, content)
         : /(?:^|\/)Makefile$/.test(file)
-          ? makefileScripts(file, content)
+          ? makefileScripts(file, content, true)
           : /\.md$/.test(file)
             ? markdownScripts(file, content)
             : sourceScripts(file, content);
@@ -706,31 +960,153 @@ test("the toolchain pin has to name the declared MSRV", () => {
   }
 });
 
-test("every npm install in the repository skips dependency lifecycle scripts", () => {
-  // publish.yml's publish-npm is the job holding `id-token: write`, and it reaches
-  // `npm ci` only through the Makefile's `$(JSON2TS)` prerequisite: one flag on that
-  // recipe, not a call in the workflow. A new install site — or a flag dropped from the
-  // existing one — would run a dependency's install script in the privileged job with
-  // nothing failing, so the invariant is checked across the whole repository rather than
-  // on any single call site. The runtime harnesses are read for the same reason and not
-  // because they run there: they never do, which is the point of the isolation the next
-  // case pins.
+test("every npm install the release build executes skips dependency lifecycle scripts", () => {
+  // publish.yml's build-npm is the unprivileged job that produces the npm release: it
+  // runs `make test-wasm` — whose `$(JSON2TS)` prerequisite runs `npm ci`, and whose
+  // recipes run `npm run build` and `npm test`, and that suite packs the tarball and
+  // `npm install`s it into a temporary consumer — and then packs the tarball that
+  // publish-npm downloads, verifies and publishes. One flag dropped from any of those
+  // recipes runs a dependency's install script in the job that produces the release
+  // bytes with nothing failing, so the invariant is checked across the files the build
+  // executes rather than on any single call site: the Makefile, the workflows, the
+  // package manifest, the package's own bin/scripts/tests, and the runtime harnesses.
+  // CI's wasm lane runs the same target and is covered by the same scan. The harnesses
+  // are read for the same rule, not because they run there: they never do, which is the
+  // isolation the next case pins.
   const harness = harnessFiles();
+  const sources = packageFiles();
   const { installs, offenders } = npmInstalls([
     ["Makefile", read("Makefile")],
     [MANIFEST, read(MANIFEST)],
     ...workflowFiles().map((file) => [file, read(file)]),
     ...harness.map((file) => [file, read(file)]),
+    ...sources.map((file) => [file, read(file)]),
   ]);
 
   assert.notDeepEqual(installs, [], "no npm install was found, so this test proves nothing");
   assert.notDeepEqual(harness, [], `no harness file was read from ${INTEGRATION}`);
+  assert.notDeepEqual(sources, [], "no package source was read from bin/, scripts/ or tests/");
+
+  // The install the release build executes through `npm test` has to be a real site in
+  // the walk, not a file this gate merely lists: prove it is included and that its own
+  // options make it safe, so dropping `--ignore-scripts` there is a red test.
+  const PACKED = "crates/opportune-wasm/js/tests/packed-package.test.mjs";
+  assert.ok(sources.includes(PACKED), `${PACKED} is outside the package-source walk`);
+  assert.notDeepEqual(
+    installs.filter((site) => site.startsWith(`${PACKED}:`)),
+    [],
+    "the suite's npm install of the packed tarball is not read",
+  );
+  assert.deepEqual(
+    offenders.filter((offender) => offender.startsWith(`${PACKED}:`)),
+    [],
+    "the suite's npm install of the packed tarball runs dependency lifecycle scripts",
+  );
   assert.deepEqual(
     offenders,
     [],
-    "these npm installs run dependency lifecycle scripts; in publish-npm that is " +
-      "arbitrary code in the job holding id-token: write",
+    "these npm installs run dependency lifecycle scripts; in build-npm that is " +
+      "arbitrary code in the job that produces the tarball publish-npm attests and publishes",
   );
+});
+
+/** A workflow whose one step runs `command`, for the shell-path scanner cases. */
+const runStep = (command) => [
+  "jobs:",
+  "  build:",
+  "    steps:",
+  `      - run: ${JSON.stringify(command)}`,
+  "",
+].join("\n");
+
+test("the npm-install gate reads the package's own bin, scripts and tests", () => {
+  const root = mkdtempSync(join(tmpdir(), "opportune-package-sources-"));
+  try {
+    const source = 'spawnSync("npm", ["ci"]);\n';
+    for (const tree of PACKAGE_SOURCE_TREES) {
+      mkdirSync(join(root, tree), { recursive: true });
+      writeFileSync(join(root, tree, "install.mjs"), source);
+    }
+    const file = "crates/opportune-wasm/js/tests/install.mjs";
+    assert.ok(
+      packageFiles(root).includes(file),
+      "an unflagged install in the package's own tests is outside the walk",
+    );
+    const { installs, offenders } = npmInstalls([[file, source]]);
+    assert.equal(installs.length, 1, "the walked install was not judged");
+    assert.equal(offenders.length, 1, "an unflagged install in the walked tree was not caught");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the package-source walk skips generated, dependency and scratch trees", () => {
+  const root = mkdtempSync(join(tmpdir(), "opportune-package-generated-"));
+  try {
+    for (const path of [
+      "tests/node_modules/dependency.mjs",
+      "tests/dist/output.mjs",
+      "tests/pkg/glue.mjs",
+      "tests/pkg-node/glue.mjs",
+      "tests/.top-level-using-abc/engine.mjs",
+      "tests/.doc-snippets-abc/snippet.mjs",
+      "bin/README.md",
+    ]) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), 'spawnSync("npm", ["ci"]);\n');
+    }
+    assert.deepEqual(
+      packageFiles(root),
+      [],
+      "the package-source walk read a generated, dependency or scratch tree",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the target build-npm runs reaches no runtime harness", () => {
+  // The gate above reads files; this reads make's own view of the target. `build-npm`
+  // runs `make test-wasm`; `publish-npm` runs no make target at all, so a harness is
+  // reachable in the release workflow only if `test-wasm` depends on one — an edge no
+  // file scanner sees in the Makefile's syntax. `-n` prints the recipes without running
+  // them (the `$(MAKE)` recursion included), so what is judged is the commands the build
+  // would actually reach.
+  const reaches = (output) =>
+    /integration\//.test(output) || /test-wasm-(?:workerd|web)/.test(output);
+  const dryRun = (cwd) =>
+    spawnSync("make", ["-n", "test-wasm"], { cwd, encoding: "utf8", timeout: 30_000 });
+
+  const real = dryRun(ROOT);
+  assert.equal(real.error, undefined, `make -n test-wasm did not start: ${real.error}`);
+  assert.equal(real.status, 0, `make -n test-wasm failed:\n${real.stderr}`);
+  assert.match(real.stdout, /\bnpm\b/, "make -n printed no npm recipe, so it proved nothing");
+  assert.ok(
+    !reaches(real.stdout),
+    "build-npm's target reaches a runtime harness through a Makefile dependency",
+  );
+
+  const root = mkdtempSync(join(tmpdir(), "opportune-make-closure-"));
+  try {
+    writeFileSync(
+      join(root, "Makefile"),
+      [
+        "test-wasm: test-wasm-workerd",
+        "\t@echo base",
+        "test-wasm-workerd:",
+        "\t@echo node crates/opportune-wasm/integration/workerd",
+        "",
+      ].join("\n"),
+    );
+    const control = dryRun(root);
+    assert.equal(control.status, 0, `the negative control did not run:\n${control.stderr}`);
+    assert.ok(
+      reaches(control.stdout),
+      "the closure check cannot see a harness a target depends on, so it proves nothing",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the runtime harnesses stay private, locked and outside the published package", () => {
@@ -953,6 +1329,56 @@ test("JavaScript data and non-install process arguments stay outside the install
   }
 });
 
+test("npm in argument position is data, not an install", () => {
+  for (const command of [
+    "echo npm install",
+    "grep -r npm install docs/",
+    "printf 'npm ci'",
+    "git log --grep npm-install",
+    "echo then npm install",
+  ]) {
+    assert.equal(
+      npmInstalls([["ci.yml", runStep(command)]]).installs.length,
+      0,
+      `${command} was read as an npm install`,
+    );
+  }
+});
+
+test("npm's own command decides whether a later install word is a subcommand", () => {
+  // `npm run install` runs a script called `install`; it does not install a package, and
+  // the same is true of `test`'s and `publish`'s arguments. The first command word ends
+  // the question, so the word after it is data.
+  for (const command of ["npm run install", "npm test install", "npm publish install"]) {
+    assert.equal(
+      npmInstalls([["ci.yml", runStep(command)]]).installs.length,
+      0,
+      `${command} was read as an npm install`,
+    );
+  }
+});
+
+test("npm in command position is still read after a prefix, a wrapper or an assignment", () => {
+  for (const [command, offenders] of [
+    ["npm install left-pad", 1],
+    ["npm --prefix dir ci", 1],
+    ["npm --prefix dir i left-pad", 1],
+    ["FOO=1 npm ci", 1],
+    ["sudo npm ci", 1],
+    ["timeout 10 npm ci", 1],
+    ["env FOO=1 npm install left-pad", 1],
+    ['sh -c "npm ci"', 1],
+    ["if npm ci; then :; fi", 1],
+    ["then npm install left-pad", 1],
+    ["! npm ci", 1],
+    ["npm --prefix dir ci --ignore-scripts", 0],
+  ]) {
+    const { installs, offenders: found } = npmInstalls([["ci.yml", runStep(command)]]);
+    assert.equal(installs.length, 1, `${command} was not read as an npm install`);
+    assert.equal(found.length, offenders, command);
+  }
+});
+
 test("multiline process diagnostics preserve each call's original source", () => {
   const source = [
     'spawnSync("npm", ["ci"]); const result = spawnSync(',
@@ -1106,6 +1532,39 @@ test("a YAML folded scalar is read as the command the shell receives", () => {
   const { installs, offenders } = npmInstalls([["ci.yaml", content]]);
   assert.equal(installs.length, 1);
   assert.equal(offenders.length, 1, "npm ci without --ignore-scripts is unsafe");
+});
+
+test("Makefile recipe modifiers do not hide an install from the gate", () => {
+  // GNU make strips the recipe modifiers from the start of a line before the shell sees
+  // it: `@` suppresses echo, `-` ignores a non-zero exit and `+` runs the line even under
+  // `-n`. The gate tokenises the recipe, so those characters have to come off there too;
+  // otherwise the command word is `@npm`, `-npm` or `+npm`.
+  const makefile = (command) => ["target:", `\t${command}`, ""].join("\n");
+
+  for (const modifier of ["@", "-", "+"]) {
+    const unsafe = npmInstalls([["Makefile", makefile(`${modifier}npm ci`)]]);
+    assert.equal(unsafe.installs.length, 1, `${modifier}npm ci was not read as an install`);
+    assert.equal(unsafe.offenders.length, 1, `${modifier}npm ci has no --ignore-scripts`);
+
+    const safe = npmInstalls([["Makefile", makefile(`${modifier}npm ci --ignore-scripts`)]]);
+    assert.equal(safe.installs.length, 1, `${modifier}npm ci --ignore-scripts was not read`);
+    assert.deepEqual(safe.offenders, [], `${modifier}npm ci --ignore-scripts was an offender`);
+  }
+
+  // Outside a Makefile recipe those characters are not modifiers. A workflow `run:` is
+  // handed to the shell as written, and a Markdown fence is shell too even though it
+  // shares the recipe's backslash-continuation join.
+  const markdown = ["```sh", "@npm ci", "```", ""].join("\n");
+  for (const [kind, files] of [
+    ["workflow", [["ci.yml", runStep("@npm ci")]]],
+    ["Markdown", [["docs/install.md", markdown]]],
+  ]) {
+    assert.equal(
+      npmInstalls(files).installs.length,
+      0,
+      `${kind} source had a Makefile-only modifier stripped`,
+    );
+  }
 });
 
 test("a flag on one command does not make the next install safe", () => {

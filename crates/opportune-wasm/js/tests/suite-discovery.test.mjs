@@ -1,24 +1,31 @@
 /**
  * One suite, two runners, and the names both of them find.
  *
- * `docs/wasm.md` and the `test-wasm` lane both promise that Node and Bun report the
- * same cases with the same count, and each lane calls its runner over this directory
- * rather than naming files: `node --test tests/` through `npm test`, and
- * `bun test crates/opportune-wasm/js/tests/`. The two runners do not agree on every
- * name. Measured on Node 26.13.0 and Bun 1.4.2, Node discovers `*.test.*`, `*-test.*`
- * and `*_test.*`; Bun discovers `*.test.*`, `*_test.*`, `*.spec.*` and `*_spec.*` but
- * not `*-test.*` — its own "tests need `.test`, `_test_`, `.spec` or `_spec_`" note
- * understates what it matches, since `name_test.mjs` runs under both.
+ * Each lane calls its runner over this directory rather than naming files: `node --test
+ * tests/` through `npm test`, and `bun test crates/opportune-wasm/js/tests/`. The two
+ * runners do not agree on every name. Measured on Node 26.13.0 and Bun 1.4.2, Node
+ * discovers `*.test.*`, `*-test.*` and `*_test.*`; Bun discovers `*.test.*`, `*_test.*`,
+ * `*.spec.*` and `*_spec.*` but not `*-test.*` — its own "tests need `.test`, `_test_`,
+ * `.spec` or `_spec_`" note understates what it matches, since `name_test.mjs` runs under
+ * both.
  *
  * A case file named for one runner therefore runs under that one alone —
  * `extra.spec.mjs` under Bun, `extra-test.mjs` under Node — and neither lane fails for
  * it. The gate would report green while the case it was added for went untested on the
- * other declared runtime, and the documented equal count would be wrong
- * in a way nothing reads. A name neither runner matches is the same silence from the
+ * other declared runtime. A name neither runner matches is the same silence from the
  * other side: it runs nowhere. So this directory holds case files only, every one of
  * them named for both runners, and a module that declares no cases — a helper, a
  * fixture loader — belongs in a subdirectory, whose names neither runner matches
  * either.
+ *
+ * The reported counts are not comparable across the runners, so this gate does not
+ * compare them: Bun executes nested `t.test` subtests but reports only the parent, and
+ * `web_loader.test.mjs` therefore reports five fewer tests under Bun while running the
+ * same cases. A failing subtest still fails its parent under both runners. What matters
+ * for a case that is present at all is its name, which is what this gate reads.
+ *
+ * The walk below is the suite root only. A case file moved into a subdirectory would not
+ * be read here, which is why the directory stays flat and helpers live one level down.
  */
 
 import assert from "node:assert/strict";

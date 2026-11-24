@@ -31,9 +31,37 @@ import test from "node:test";
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
 const DRIVER = join(ROOT, "crates/opportune-py/bin/doc_snippets.py");
 
+/**
+ * The longest one driver run may take.
+ *
+ * The lane compiles every TypeScript snippet and then runs each block in its own child;
+ * on this repository that is under two seconds, so this is a bound with room for a cold
+ * filesystem rather than a deadline the happy path meets. `spawnSync` blocks the event
+ * loop, so the test's own `timeout` option cannot fire while the child is stuck: this
+ * option is the only bound that can.
+ */
+const GATE_TIMEOUT_MS = 45_000;
+
+/** A child's status, signal, spawn error and streams, as a failure a reader can act on. */
+function report(run) {
+  return [
+    `status: ${String(run.status)}`,
+    `signal: ${String(run.signal)}`,
+    `error: ${run.error?.message ?? "none"}`,
+    `stdout: ${JSON.stringify(run.stdout ?? "")}`,
+    `stderr: ${JSON.stringify(run.stderr ?? "")}`,
+  ].join("\n");
+}
+
 /** Run the real driver over `root`, capturing both streams. */
 function gate(root, ...arguments_) {
-  return spawnSync("python3", [DRIVER, "--root", root, ...arguments_], { encoding: "utf8" });
+  const run = spawnSync("python3", [DRIVER, "--root", root, ...arguments_], {
+    encoding: "utf8",
+    timeout: GATE_TIMEOUT_MS,
+  });
+  assert.equal(run.error, undefined, `the snippet gate did not finish:\n${report(run)}`);
+  assert.equal(run.signal, null, `the snippet gate was killed:\n${report(run)}`);
+  return run;
 }
 
 test("a stale TypeScript snippet fails the TypeScript lane", { timeout: 60_000 }, () => {
@@ -50,7 +78,7 @@ test("a stale TypeScript snippet fails the TypeScript lane", { timeout: 60_000 }
     assert.notEqual(stale, text, "docs/wasm.md no longer carries the zone this case mutates");
     writeFileSync(page, stale);
     const result = gate(root, "--typescript");
-    const output = `${result.stdout}${result.stderr}`;
+    const output = report(result);
     assert.match(result.stdout ?? "", /classified fences/);
     assert.notEqual(result.status, 0, "the TypeScript lane accepted a stale snippet");
     // The execution half failed on the intended snippet, not classification or tsc.
@@ -76,7 +104,7 @@ test("a TypeScript snippet that stops type-checking fails the TypeScript lane", 
     assert.notEqual(stale, text, "docs/wasm.md no longer carries the limits block this case mutates");
     writeFileSync(page, stale);
     const result = gate(root, "--typescript");
-    const output = `${result.stdout}${result.stderr}`;
+    const output = report(result);
     assert.notEqual(result.status, 0, "the TypeScript lane accepted a snippet tsc rejects");
     assert.match(output, /tsc over the TypeScript snippets failed/);
   } finally {
@@ -101,7 +129,7 @@ test("a fence tagged with the language's full name is classified", () => {
     assert.notEqual(retagged, text, "docs/wasm.md no longer opens u1 with a bare `ts` fence");
     writeFileSync(page, retagged);
     const result = gate(root);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, report(result));
     assert.match(result.stdout ?? "", /classified fences/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -125,7 +153,7 @@ test("a stale TypeScript result assertion fails the TypeScript lane", { timeout:
     assert.notEqual(stale, text, "docs/recipes.md no longer carries the booth assertion");
     writeFileSync(page, stale);
     const result = gate(root, "--typescript");
-    const output = `${result.stdout}${result.stderr}`;
+    const output = report(result);
     assert.notEqual(result.status, 0, "the TypeScript lane accepted a stale result assertion");
     assert.match(output, /`booth-ts` failed with status/);
   } finally {
@@ -148,7 +176,7 @@ test("a TypeScript snippet cannot end the lane with success", { timeout: 60_000 
     assert.notEqual(stale, text, "docs/wasm.md no longer carries the line this case mutates");
     writeFileSync(page, stale);
     const result = gate(root, "--typescript");
-    const output = `${result.stdout}${result.stderr}`;
+    const output = report(result);
     assert.notEqual(result.status, 0, "a snippet that ended the process with zero passed");
     assert.match(output, /`wasm-ts-quickstart` ended the process/);
   } finally {
@@ -182,7 +210,7 @@ test("the npm package's README is one of the pages the gate reads", () => {
     assert.notEqual(stale, text, "the npm README no longer carries the marker this case mutates");
     writeFileSync(page, stale);
     const result = gate(root);
-    const output = `${result.stdout}${result.stderr}`;
+    const output = report(result);
     assert.notEqual(result.status, 0, "a `.ts` block in the published README went unchecked");
     assert.match(
       output,

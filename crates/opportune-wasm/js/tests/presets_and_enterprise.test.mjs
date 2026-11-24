@@ -975,14 +975,132 @@ test("andWho and exceptWho carry a malformed who to the engine instead of throwi
     assert.match(rejected.message, /`selector`/, "andWho names the argument it refused");
   }
 
-  // `exceptWho` wraps its selector before `andWho` reads it, so an unspellable one
-  // reaches the engine as `{ not: }` — an object naming no selector — and fails closed
-  // there rather than at the preset. What it must never do is be silently accepted.
-  const wrapped = rejection(() =>
-    findAvailability(booking([exceptWho({ ...hours, who: true }, () => true)])),
-  );
+  // `exceptWho` wraps its selector before `andWho` reads it. A function inside `{ not: }`
+  // is written by the wire as `{}` — an object naming no selector — so the wrapped value
+  // is now refused at the preset, naming `selector`, rather than being carried to the
+  // engine as an empty object. What it must never do is be silently accepted, which the
+  // old spelling was one `JSON.stringify` away from.
+  const wrapped = rejection(() => exceptWho({ ...hours, who: true }, () => true));
   assert.ok(wrapped instanceof OpportuneError, String(wrapped));
-  assert.equal(wrapped.code, "invalid_value", "exceptWho's wrapped selector is no selector");
+  assert.equal(wrapped.code, "invalid_type", "exceptWho's wrapped selector writes no selector");
+  assert.match(wrapped.message, /`selector`/, "exceptWho names the selector it refused");
+});
+
+test("a preset refuses a who or when the wire writes as no selector", () => {
+  // `who` and `when` are the callers' own selectors, and a rule the preset build leaves
+  // them off is read by the engine as its default — every host, every booking. A value
+  // the wire writes as no selector at all therefore has to be refused here, because the
+  // same rule used to leave the preset with the default the caller meant to override: a
+  // personal link that reached every host, or a cap that applied to every booking, with
+  // nothing failing. `JSON.stringify` writes no member for a function or a symbol, and
+  // writes `{}` for a `Map`, a `Set`, a `RegExp` or an empty object — and `null` for an
+  // invalid `Date`, which the wire reads as the default name — so the spelling decides.
+  const dropped = [
+    ["a function", () => true],
+    ["a symbol", Symbol("vip")],
+    ["a Map", new Map([["ids", ["ana"]]])],
+    ["a Set", new Set(["ana"])],
+    ["a RegExp", /ana/],
+    ["an empty object", {}],
+    ["an invalid Date", new Date(Number.NaN)],
+  ];
+  for (const [label, unspellable] of dropped) {
+    for (const [name, build, field] of [
+      ["businessHours", () => businessHours("mon-fri", "09:00-17:00", { who: unspellable }), "who"],
+      ["weeklyHours", () => weeklyHours({ mon: "09:00-17:00" }, { when: unspellable }), "when"],
+      ["capPerDay", () => capPerDay({ tag: "interview" }, 2, { who: unspellable }), "who"],
+      ["rest", () => rest("22:00", "08:00", { when: unspellable }), "when"],
+    ]) {
+      const rejected = rejection(build);
+      assert.ok(
+        rejected instanceof OpportuneError,
+        `${name} refused ${label} as a ${field}, not a ${rejected?.constructor?.name}`,
+      );
+      assert.equal(rejected.code, "invalid_type", `${name} with ${label} as ${field}`);
+      assert.match(rejected.message, new RegExp(`\`${field}\``), `${name} names the field`);
+      assert.match(rejected.message, /wire can carry/, `${name} says why it refused the value`);
+    }
+  }
+
+  // What the wire does carry is still written exactly as the caller gave it. A selector
+  // object and the `null` that is the wire's own default reach the rule unchanged, an
+  // absent one stays absent, and `true` stays the unconditional selector.
+  const hours = businessHours("mon-fri", "09:00-17:00", { who: { ids: ["ana"] } });
+  assert.deepEqual(hours.who, { ids: ["ana"] });
+  assert.equal(businessHours("mon-fri", "09:00-17:00", { who: null }).who, null);
+  assert.equal(businessHours("mon-fri", "09:00-17:00", { who: true }).who, true);
+  assert.equal("who" in businessHours(), false, "an absent who is still absent");
+
+  // The check reads the JSON spelling, not the keys: a class instance whose own fields
+  // are the members the wire reads is a selector, a boxed boolean spells the `true` the
+  // wire reads as unconditional, and an object with a `toJSON` is whatever that returns.
+  class Ids {
+    constructor() {
+      this.ids = ["ana"];
+    }
+  }
+  for (const [label, value, spelled] of [
+    ["a class instance's own fields", new Ids(), { ids: ["ana"] }],
+    ["a boxed true", new Boolean(true), true],
+    ["an object with a toJSON", { toJSON: () => ({ tag: "vip" }) }, { tag: "vip" }],
+  ]) {
+    const rule = businessHours("mon-fri", "09:00-17:00", { who: value });
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(rule)).who,
+      spelled,
+      `${label} is written as the selector it spells`,
+    );
+  }
+
+  // A `Date` is not silently emptied: a valid one spells its instant, so the rule carries
+  // it and the engine rejects it at the field the caller wrote, with the pointer.
+  const asDate = businessHours("mon-fri", "09:00-17:00", {
+    who: new Date("2027-06-14T00:00:00Z"),
+  });
+  assert.equal(
+    JSON.parse(JSON.stringify(asDate)).who,
+    "2027-06-14T00:00:00.000Z",
+    "a valid Date is carried as its spelling rather than read as an empty selector",
+  );
+  const dated = rejection(() =>
+    findAvailability({
+      now: "2027-06-14T00:00Z",
+      goal: singleGoal("30m", { all: [atLeast(1, { role: "host" })] }, {
+        zone: "UTC",
+        searchWindow: ["2027-06-15T09:00Z", "2027-06-15T11:00Z"],
+      }),
+      participants: [{ id: "ana", role: "host", zone: "UTC", calendar: [] }],
+      rules: [asDate],
+    }),
+  );
+  assert.equal(dated.code, "invalid_type", "the engine rejects the carried Date at its field");
+  assert.match(dated.message, /selector/, "the engine names the selector it wanted");
+
+  // The rule the caller wrote is what the engine evaluates, so a selector carried here
+  // is visible in the answer: the rule constrains `ana` alone, and `tom` — a host in a
+  // zone whose working day is over at this instant — stays an eligible candidate. A
+  // `who` the wire dropped would leave the host default in place, and the same rule
+  // would have excluded him.
+  const request = {
+    now: "2027-06-14T00:00Z",
+    goal: singleGoal("30m", { all: [atLeast(1, { role: "host" })] }, {
+      zone: "UTC",
+      searchWindow: ["2027-06-15T09:00Z", "2027-06-15T11:00Z"],
+      candidates: ["2027-06-15T09:00Z"],
+    }),
+    participants: [
+      { id: "ana", role: "host", zone: "UTC", calendar: [] },
+      { id: "tom", role: "host", zone: "Asia/Tokyo", calendar: [] },
+    ],
+    rules: [businessHours("mon-fri", "09:00-17:00", { who: { ids: ["ana"] } })],
+  };
+  const offered = findAvailability(request);
+  assert.equal(offered.offers.length, 1, "the request offers its candidate start");
+  assert.deepEqual(
+    offered.offers[0].events[0].eligible,
+    [["ana", "tom"]],
+    "the who the caller wrote reached the engine, so the unconstrained host stays eligible",
+  );
 });
 
 test("andWho keeps a host rule off a resource room and off an attendee", () => {

@@ -1,5 +1,5 @@
 /**
- * `opportune/web`: explicit WASM initialization for browsers and generic Web Workers.
+ * `opportune/web`: explicit WASM initialization for browsers and module Web Workers.
  *
  * ```ts
  * import { init } from "opportune/web";

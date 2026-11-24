@@ -24,11 +24,24 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { wasmModule, init, initSync } from "../dist/wasm-web.js";
 
+/** The package root, and the browser loader file the `browser`/`worker` conditions name. */
+const PACKAGE = join(import.meta.dirname, "..");
+const LOADER = pathToFileURL(join(PACKAGE, "dist", "wasm-web.js")).href;
+
 /** The built module the server answers with, and the path it answers on. */
-const WASM = join(import.meta.dirname, "..", "dist", "pkg", "opportune_wasm_bg.wasm");
+const WASM = join(PACKAGE, "dist", "pkg", "opportune_wasm_bg.wasm");
+
+/**
+ * The Node binary that drives the glue-boundary probe.
+ *
+ * Bun's loader has no `module.registerHooks`, so the probe runs on Node proper even under
+ * the Bun lane — the browser-loader source it imports is the same file either way.
+ */
+const NODE = process.versions.bun ? "node" : process.execPath;
 
 /** A loopback server that answers the module once per request and 404s everything else. */
 async function server() {
@@ -60,7 +73,7 @@ function publicGraph(source, conditions = []) {
   const run = spawnSync(
     process.execPath,
     [...conditions.map((condition) => `--conditions=${condition}`), "--input-type=module", "--eval", source],
-    { cwd: join(import.meta.dirname, ".."), encoding: "utf8", timeout: 10_000 },
+    { cwd: PACKAGE, encoding: "utf8", timeout: 10_000 },
   );
   assert.equal(run.error, undefined, `the public-graph process did not finish: ${run.error?.message}`);
   assert.equal(run.status, 0, `the public graph failed:\n${run.stdout}${run.stderr}`);
@@ -288,4 +301,119 @@ test("the web loader loads once, retries after failure and never double-instanti
       engine.free();
     }
   });
+});
+
+/**
+ * Drives the shipped browser loader against glue built from an older surface.
+ *
+ * `registerHooks` replaces only `#wasm-glue`, the host boundary the loader imports; the
+ * loader, its validation and its error translation are the published files. The stub
+ * models wasm-bindgen's own early return: it instantiates once and then keeps the module
+ * it produced, so a retry re-enters the loader but not the compiler — which is what makes
+ * `instantiated` a real assertion about the second attempt.
+ *
+ * `entry` selects the loader initialiser under test; both share the same stub because
+ * what is under test is the loader's refusal, not the glue's two spellings.
+ */
+function staleGlueProbe(entry) {
+  const source = `
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+
+    globalThis.__instantiated = 0;
+
+    const glue = \`
+      let wasm;
+      let loading;
+      export function initSync(options) {
+        if (wasm !== undefined) return wasm;
+        globalThis.__instantiated += 1;
+        wasm = { stale: true };
+        return wasm;
+      }
+      export default function init(input) {
+        if (wasm !== undefined) return Promise.resolve(wasm);
+        loading ??= Promise.resolve().then(() => {
+          globalThis.__instantiated += 1;
+          wasm = { stale: true };
+          return wasm;
+        });
+        return loading;
+      }
+    \`;
+
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        if (specifier === "#wasm-glue") {
+          return { url: "data:text/javascript," + encodeURIComponent(glue), shortCircuit: true };
+        }
+        return nextResolve(specifier, context);
+      },
+    });
+
+    const loader = await import(${JSON.stringify(LOADER)});
+
+    assert.throws(
+      () => loader.wasmModule(),
+      (thrown) => {
+        assert.equal(thrown.code, "wasm_unavailable");
+        assert.match(thrown.message, /not loaded/);
+        return true;
+      },
+      "an unloaded browser realm answered an engine call before init",
+    );
+
+    const invoke = ${JSON.stringify(entry)} === "initSync"
+      ? () => loader.initSync({ module: {} })
+      : () => loader.init("https://example.test/opportune_wasm_bg.wasm");
+
+    const messages = [];
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await assert.rejects(
+        async () => { await invoke(); },
+        (thrown) => {
+          assert.equal(thrown.name, "OpportuneError", "attempt " + attempt);
+          assert.equal(thrown.code, "wasm_unavailable", "attempt " + attempt);
+          assert.equal(thrown.path, null, "attempt " + attempt);
+          assert.deepEqual(thrown.errors, [], "attempt " + attempt);
+          assert.match(thrown.message, /does not export WasmEngine/, "attempt " + attempt);
+          assert.match(thrown.message, /older surface/, "attempt " + attempt);
+          assert.match(thrown.message, /npm install opportune/, "attempt " + attempt);
+          assert.match(thrown.message, /make wasm/, "attempt " + attempt);
+          messages.push(thrown.message);
+          return true;
+        },
+        "attempt " + attempt + " did not report the stale glue",
+      );
+      assert.throws(
+        () => loader.wasmModule(),
+        { code: "wasm_unavailable" },
+        "attempt " + attempt + " cached the refused glue as loaded",
+      );
+    }
+
+    assert.equal(messages[0], messages[1], "the two attempts reported different errors");
+    assert.equal(
+      globalThis.__instantiated,
+      1,
+      "the refused glue was instantiated more than once, so the retry did not take wasm-bindgen's early return",
+    );
+  `;
+
+  const run = spawnSync(NODE, ["--input-type=module", "--eval", source], {
+    cwd: PACKAGE,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+  assert.equal(run.error, undefined, `the browser-loader probe did not finish: ${run.error?.message}\n${output}`);
+  assert.equal(run.status, 0, `the browser-loader probe failed:\n${output}`);
+}
+
+test("the browser loader refuses stale glue from initSync and retries it consistently", () => {
+  staleGlueProbe("initSync");
+});
+
+test("the browser loader refuses stale glue from async init and retries it consistently", () => {
+  staleGlueProbe("init");
 });

@@ -1,6 +1,6 @@
 # WASM and TypeScript
 
-`opportune` is also published as an npm package for Node 24+, Bun 1.4.2+, Cloudflare Workers (`workerd`), browsers, and generic Web Workers: the same Rust engine compiled to `wasm32-unknown-unknown` with `wasm-bindgen` and wrapped in a strict TypeScript API. The IANA time zone database is bundled inside the module, so calls need no native toolchain and no `TZif` files on disk.
+`opportune` is also published as an npm package for Node 24+, Bun 1.4.2+, Cloudflare Workers (`workerd`), browsers, and module Web Workers: the same Rust engine compiled to `wasm32-unknown-unknown` with `wasm-bindgen` and wrapped in a strict TypeScript API. The IANA time zone database is bundled inside the module, so calls need no native toolchain and no `TZif` files on disk.
 
 The binding crosses into Rust via the JSON wire format. Request and response documents match the Rust and Python surfaces byte-for-byte, verified against the committed golden corpus in `crates/opportune-testkit/goldens/`. TypeScript definitions are generated directly from the exported JSON Schema (`make codegen-ts`), keeping types in sync with the wire format. The same Draft 2020-12 bundle ships with the package as `opportune/schema.json`, exported from `package.json`, so a consumer that validates a request before sending it — with Ajv, or a provider's own validation — reads the document the engine validates against. `make check-codegen-ts` fails if the shipped file drifts from `export_schema`.
 
@@ -14,7 +14,7 @@ Install the package from npm:
 npm install opportune
 ```
 
-Requires Node 24 or newer, or Bun 1.4.2 or newer, as `engines` in the manifest states. Cloudflare Workers (`workerd`), browsers, and generic Web Workers are also supported through `package.json#imports["#wasm"]` and `opportune/web`, described below. Node 24 is the oldest release line supporting `using` and `Symbol.dispose`; CI tests the packed package on Node 24, Node 26, Bun 1.4.2, Cloudflare `workerd` (via `@cloudflare/vitest-plugin`), and Chromium/Firefox/WebKit plus a real module Web Worker (via Vitest Browser Mode + Playwright).
+Requires Node 24 or newer, or Bun 1.4.2 or newer, as `engines` in the manifest states. Cloudflare Workers (`workerd`), browsers, and module Web Workers are also supported through `package.json#imports["#wasm"]` and `opportune/web`, described below. Node 24 is the oldest release line supporting `using` and `Symbol.dispose`; CI tests the packed package on Node 24, Node 26, Bun 1.4.2, Cloudflare `workerd` (via `@cloudflare/vitest-plugin`), and Chromium/Firefox/WebKit plus a real module Web Worker (via Vitest Browser Mode + Playwright).
 
 ### Building from source
 
@@ -29,13 +29,13 @@ npm pack crates/opportune-wasm/js --pack-destination /tmp --ignore-scripts
 npm install --ignore-scripts --prefix /tmp/opportune-consumer /tmp/opportune-*.tgz
 ```
 
-One crate is built for two targets — `wasm-pack` emits byte-identical `.wasm` files, and the package publishes **one** `.wasm` binary with both generated glues (`opportune_wasm.cjs` for Node/Bun and `opportune_wasm.js` for Workers/browsers) so each runtime uses `wasm-bindgen`'s own loader without duplicating the binary. `make wasm` runs the first four steps.
+One crate is built for two targets — `wasm-pack` emits byte-identical `.wasm` files, and the package publishes **one** `.wasm` binary with both generated glues (`opportune_wasm.cjs` for Node/Bun and `opportune_wasm.js` for the Cloudflare Worker and browser/module Web Worker loaders) so each runtime uses `wasm-bindgen`'s own loader without duplicating the binary. `make wasm` runs the first four steps.
 
 ### Server runtimes, Cloudflare Workers, Next.js, and browsers
 
 - **Node 24+ and Bun 1.4.2+ (`node`, `default`):** the `#wasm` loader lazily requires the CommonJS glue on the first engine call, keeping `new Engine()` and `require("opportune")` 100% synchronous with zero top-level `await`.
 - **Cloudflare Workers (`workerd`):** a Worker has no filesystem and `workerd` refuses runtime `WebAssembly.compile` / `new WebAssembly.Module(bytes)`. Under the `workerd` condition, `#wasm` statically imports `./pkg/opportune_wasm_bg.wasm` (precompiled at bundle time via a `CompiledWasm` rule in `wrangler.jsonc`) and instantiates it lazily via `initSync({ module })` on the first engine call. Build one module-scoped `Engine` per isolate and reuse it across requests. Verified in real `workerd` via `make test-wasm-workerd`.
-- **Browsers and generic Web Workers (`browser`, `worker`):** call `await init(wasmUrl)` (or `initSync({ module })`) from `opportune/web` once before calling the engine, passing the `.wasm` asset URL (exported as `opportune/opportune_wasm_bg.wasm`, e.g., `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"` in Vite). Calling the engine before initialization throws `OpportuneError` (`code: "wasm_unavailable"`). Concurrent `init()` calls share one load, failures reset cleanly for retry, and repeat calls after initialization are no-ops. Verified in Chromium, Firefox, WebKit, and a real module Web Worker via `make test-wasm-web`.
+- **Browsers and module Web Workers (`browser`, `worker`):** call `await init(wasmUrl)` (or `initSync({ module })`) from `opportune/web` once before calling the engine, passing the `.wasm` asset URL (exported as `opportune/opportune_wasm_bg.wasm`, e.g., `import wasmUrl from "opportune/opportune_wasm_bg.wasm?url"` in Vite). Calling the engine before initialization throws `OpportuneError` (`code: "wasm_unavailable"`). Concurrent `init()` calls share one load, failures reset cleanly for retry, and repeat calls after initialization are no-ops. Verified in Chromium, Firefox, WebKit, and a real module Web Worker via `make test-wasm-web`.
 - **Next.js App Router:** keep `opportune` on the Node.js runtime (not legacy Edge) and mark it external in `next.config.mjs`:
 
 ```js
@@ -48,11 +48,14 @@ export default { serverExternalPackages: ["opportune"] };
 
 ### Cloudflare Workers: compile the module in the bundle
 
-A Worker has no filesystem, so the `.wasm` must arrive as part of the bundle. Wrangler compiles a static `.wasm` import into a `WebAssembly.Module` when a `CompiledWasm` rule matches it (`fallthrough: true` matters only if you declare a second rule of the same `type`, which it keeps eligible; imports of other types are unaffected by it):
+A Worker has no filesystem, so the `.wasm` must arrive as part of the bundle. Wrangler compiles a static `.wasm` import into a `WebAssembly.Module` when a `CompiledWasm` rule matches it (`fallthrough: true` matters only if you declare a second rule of the same `type`, which it keeps eligible; imports of other types are unaffected by it). The three keys beside `rules` are the minimum a deployment needs:
 
 ```jsonc
 // wrangler.jsonc
 {
+  "name": "opportune-worker",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-24",
   "rules": [
     { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
   ]
@@ -60,6 +63,8 @@ A Worker has no filesystem, so the `.wasm` must arrive as part of the bundle. Wr
 ```
 
 Then import `opportune` as usual: the `workerd` condition selects the loader that imports the precompiled module and instantiates it on the first engine call.
+
+If you build with the Cloudflare Vite plugin, omit `rules`: the plugin compiles the package's static `.wasm` import itself, and Wrangler's `rules` key is not applicable in that setup.
 
 <!-- snippet: wasm-ts-cloudflare-worker -->
 ```ts
@@ -73,34 +78,51 @@ export default {
     if (request.method !== "POST") {
       return new Response("POST a request document", { status: 405 });
     }
+    let document: Parameters<Engine["findAvailabilityJson"]>[0];
     try {
-      const document = (await request.json()) as Parameters<Engine["findAvailabilityJson"]>[0];
+      document = (await request.json()) as Parameters<Engine["findAvailabilityJson"]>[0];
+    } catch {
+      return Response.json(
+        { code: "invalid_json", message: "the request body is not JSON" },
+        { status: 422 },
+      );
+    }
+
+    try {
       return new Response(engine.findAvailabilityJson(document), {
         headers: { "content-type": "application/json" },
       });
     } catch (thrown) {
-      if (!(thrown instanceof OpportuneError)) throw thrown;
-      return Response.json({ code: thrown.code, message: thrown.message }, {
-        status: httpStatusForError(thrown),
-      });
+      if (thrown instanceof OpportuneError && httpStatusForError(thrown) === 422) {
+        return Response.json(
+          { code: thrown.code, message: thrown.message },
+          { status: 422 },
+        );
+      }
+      // The detail stays in the Worker log; the response names no internals.
+      console.error(thrown);
+      return Response.json(
+        { code: "internal_error", message: "the request could not be served" },
+        { status: 500 },
+      );
     }
   },
 };
 ```
 
-Never call `engine.free()` on a module-scoped engine: it disposes the isolate's shared WASM handle and every later request throws `engine_disposed`.
+Never call `engine.free()` on the module-scoped engine you serve requests with: it disposes that engine's WASM handle, and every later call through that instance throws `engine_disposed`. Other `Engine` instances, including the free functions' shared engine, keep their own handles.
 
-### Browsers and Web Workers: initialize once
+### Browsers and module Web Workers: initialize once
 
-A browser or generic Web Worker must call `init()` from `opportune/web` before the first engine call, passing the `.wasm` asset URL. Calling `new Engine()` first throws `OpportuneError` with code `wasm_unavailable`.
+A browser or module Web Worker must call `init()` from `opportune/web` before the first engine call, passing the `.wasm` asset URL. Calling `new Engine()` first throws `OpportuneError` with code `wasm_unavailable`.
 
 ```js
 // main.js or worker.js
 import { Engine } from "opportune";
 import { init } from "opportune/web";
+// Vite: resolve the package's .wasm as an asset URL.
+import wasmUrl from "opportune/opportune_wasm_bg.wasm?url";
 
-// Vite: import wasmUrl from "opportune/opportune_wasm_bg.wasm?url";
-const wasmUrl = new URL("/opportune_wasm_bg.wasm", import.meta.url);
 await init(wasmUrl);
 
 const engine = new Engine();
@@ -395,8 +417,10 @@ make test-wasm-web     # run the Web harness suite in Chromium, Firefox, WebKit,
 
 The two runtime targets install the packed tarball into their own private harness under
 `crates/opportune-wasm/integration/` and run that harness's Vitest suite — golden parity,
-adapters, presets, disposal, structured errors and the loader's initialization states,
-inside the real runtime — rather than re-running the Node suite above.
+adapters, presets, disposal and structured errors inside the real runtime — rather than
+re-running the Node suite above. The web harness also covers the loader's initialization
+states: pre-init rejection, retry after a failed load, one shared concurrent load, and
+repeat calls as no-ops.
 
 `make test-wasm` also type-checks every classified `ts` snippet across the documentation and executes the `run`-mode ones (`make test-docs-snippets-ts` runs that lane alone). Its `node --test` suite runs `publint` and `@arethetypeswrong/cli` (`attw`) against the packed tarball, so a manifest or declaration regression fails the lane a consumer would.
 
@@ -406,4 +430,4 @@ Run the identical suite under Bun without rewriting any tests:
 bun test crates/opportune-wasm/js/tests/
 ```
 
-Tooling is installed via `npm ci --ignore-scripts` from the committed `package-lock.json` (do not run `bun install` inside `crates/opportune-wasm/js`). CI runs the suite on Node 24, Node 26, and Bun, including packed-tarball install, subpath resolution, CommonJS entrypoints, and TypeScript declaration checks.
+Tooling is installed via `npm ci --ignore-scripts` from the committed `package-lock.json` (do not run `bun install` inside `crates/opportune-wasm/js`). CI runs the full suite on Node 26 and Bun 1.4.2; on Node 24 it runs the packed-package suite and the TypeScript snippet lane, which cover packed-tarball install, subpath resolution, CommonJS entrypoints, and TypeScript declaration checks.

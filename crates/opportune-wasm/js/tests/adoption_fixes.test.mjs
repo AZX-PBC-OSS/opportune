@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import {
   Engine,
@@ -42,7 +43,7 @@ import {
   singleGoal,
   weeklyHours,
 } from "../dist/index.js";
-import { calendarViewToBlocks } from "../dist/adapters/graph.js";
+import { calendarViewToBlocks, workingHoursToRule } from "../dist/adapters/graph.js";
 
 /** The package root this suite belongs to, the built tree, and the glue the loader resolves. */
 const PACKAGE = join(import.meta.dirname, "..");
@@ -322,6 +323,91 @@ test("a category map that is a collection is refused rather than read as no mapp
   assert.equal(
     calendarViewToBlocks(CALENDAR_VIEW, "UTC", { categoryMap: { A: "tag/a" } }).status,
     "available",
+  );
+});
+
+test("a category map built in another realm is a plain mapping", () => {
+  // A browser iframe or a Node `vm` context builds a plain object against its own
+  // realm's `Object.prototype`, not this one's. It is still a mapping: `JSON.stringify`
+  // writes its members exactly as it writes a current-realm object literal's, so the
+  // adapter must not refuse it as a class instance merely because the prototypes differ.
+  const map = runInNewContext('({ A: "tag/a" })');
+  assert.notEqual(
+    Object.getPrototypeOf(map),
+    Object.prototype,
+    "the fixture is not an object from this realm",
+  );
+  assert.equal(
+    calendarViewToBlocks(CALENDAR_VIEW, "UTC", { categoryMap: map }).status,
+    "available",
+  );
+});
+
+/** One mailbox's `workingHours`, the shape the Graph fixture carries. */
+const WORKING_HOURS = JSON.stringify({
+  daysOfWeek: ["monday"],
+  startTime: "09:00:00.0000000",
+  endTime: "17:00:00.0000000",
+  timeZone: { name: "UTC" },
+});
+
+test("a working-hours selector the wire writes as none is refused instead of leaving the rule's default", () => {
+  // The outcome carries a rule the caller stores and feeds back to the engine, and `who`
+  // and `when` are the caller's own selectors. A value the wire writes as no selector at
+  // all — a function or a symbol (no member), or an object that spells `{}` or `null` —
+  // used to leave the stored rule with its own default (every host, every booking), so a
+  // policy the caller meant to narrow silently widened. The adapter refuses the value
+  // instead, naming the field the caller has to fix.
+  const dropped = [
+    ["a function", () => true],
+    ["a symbol", Symbol("vip")],
+    ["a Map", new Map([["ids", ["ana"]]])],
+    ["a Set", new Set(["ana"])],
+    ["a RegExp", /ana/],
+    ["an empty object", {}],
+    ["an invalid Date", new Date(Number.NaN)],
+  ];
+  for (const [field, name] of [["who", "who"], ["when", "when"]]) {
+    for (const [label, unspellable] of dropped) {
+      const error = thrown(() => workingHoursToRule(WORKING_HOURS, { [field]: unspellable }));
+      assert.equal(error.code, "invalid_type", `${field} as ${label}`);
+      assert.match(error.message, new RegExp(`\`${field}\``), `names the ${field} it refused`);
+      assert.match(error.message, /wire can carry/, "says why it refused the value");
+    }
+  }
+
+  // The check reads the JSON spelling: a class instance whose own fields the wire reads
+  // is the selector it spells, and a boxed `true` and `null` keep the meaning the wire
+  // gives them rather than being refused.
+  class Ids {
+    constructor() {
+      this.ids = ["ana"];
+    }
+  }
+  const own = workingHoursToRule(WORKING_HOURS, { who: new Ids() });
+  assert.equal(own.status, "available");
+  assert.deepEqual(JSON.parse(JSON.stringify(own)).rule.who, { ids: ["ana"] });
+  const boxed = workingHoursToRule(WORKING_HOURS, { who: new Boolean(true) });
+  assert.equal(JSON.parse(JSON.stringify(boxed)).rule.who, true, "a boxed true spells `true`");
+  const unconditional = workingHoursToRule(WORKING_HOURS, { who: true });
+  assert.equal(unconditional.rule.who, true, "`true` stays the unconditional selector");
+  const defaulted = workingHoursToRule(WORKING_HOURS, { who: null });
+  assert.equal(defaulted.rule.who, null, "`null` stays the wire's default name");
+
+  // A selector the wire carries replaces the rule's default as before, and is still on
+  // the document after the round trip the caller stores it by.
+  const carried = workingHoursToRule(WORKING_HOURS, { who: { ids: ["ana"] } });
+  assert.equal(carried.status, "available");
+  assert.deepEqual(carried.rule.who, { ids: ["ana"] });
+  assert.deepEqual(JSON.parse(JSON.stringify(carried)).rule.who, { ids: ["ana"] });
+
+  // A `Date` is not one of the dropped shapes: a valid one spells its instant, so it
+  // stays on the rule and the engine rejects it at the field the caller wrote.
+  const dated = workingHoursToRule(WORKING_HOURS, { who: new Date("2027-06-14T00:00:00Z") });
+  assert.equal(
+    JSON.parse(JSON.stringify(dated)).rule.who,
+    "2027-06-14T00:00:00.000Z",
+    "a valid Date is carried as its spelling rather than read as no selector",
   );
 });
 

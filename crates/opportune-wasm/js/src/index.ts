@@ -1,6 +1,6 @@
 /**
  * The typed public API over the `opportune` engine, for Node, Bun, Cloudflare Workers,
- * browsers and generic Web Workers.
+ * browsers and module Web Workers.
  *
  * ```ts
  * import { businessHours, findAvailability, person, singleGoal } from "opportune";

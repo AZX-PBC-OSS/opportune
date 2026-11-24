@@ -20,7 +20,15 @@
 
 import { adapterOptions, binding, isEngine, type Engine } from "../engine.js";
 import { rejection } from "../errors.js";
-import { argument, asPlainRecord, documentText, payloadText, readDocument, typeName } from "../json.js";
+import {
+  argument,
+  asPlainRecord,
+  assertCarryable,
+  documentText,
+  payloadText,
+  readDocument,
+  typeName,
+} from "../json.js";
 import { translated } from "../wasm.js";
 import type { CalendarOutcome, GraphWorkingHoursOutcome, Selector } from "../generated/types.js";
 
@@ -155,8 +163,8 @@ export function getScheduleToBlocks(
  *
  * @throws OpportuneError with code `argument_not_utf8` when the rule ID holds an
  *   unpaired surrogate, `invalid_type` when `options` or the rule ID is not the
- *   type the signature names, and `invalid_json` when the payload has no JSON or
- *   UTF-8 spelling.
+ *   type the signature names or when `who`/`when` is a selector the wire writes as
+ *   no selector, and `invalid_json` when the payload has no JSON or UTF-8 spelling.
  */
 export function workingHoursToRule(
   payload: string | object,
@@ -171,6 +179,16 @@ export function workingHoursToRule(
   const outcome = readDocument<GraphWorkingHoursOutcome>(answer);
   if (outcome.status !== "available" || (who === undefined && when === undefined)) {
     return outcome;
+  }
+  // A selector the wire writes as no selector would leave this rule with its own default
+  // `who` or `when` — every host or every booking — and a caller's policy would silently
+  // widen or narrow to what it never asked for. The engine never sees the value, so the
+  // rejection is this layer's.
+  if (who !== undefined) {
+    assertCarryable(who, "who");
+  }
+  if (when !== undefined) {
+    assertCarryable(when, "when");
   }
   // A field the caller left absent keeps the rule's own default, so only the
   // selectors that were named are replaced.

@@ -1,5 +1,5 @@
 /**
- * The `#wasm` loader browsers and generic Web Workers resolve.
+ * The `#wasm` loader browsers and module Web Workers resolve.
  *
  * Neither runtime has a Node filesystem or a guaranteed static `.wasm` module
  * rule, so callers initialize once via `opportune/web` (`await init(...)` or
@@ -14,8 +14,22 @@ import initWasm, * as glue from "#wasm-glue";
 import { reason, rejection } from "./errors.js";
 import { exportsEngine, REPAIR, type WasmModule } from "./wasm.js";
 
+/**
+ * A module the build already compiled, as `WebAssembly.Module` provides one.
+ *
+ * The platform declares that interface empty: `lib.dom` and `lib.webworker` both write
+ * `interface Module {}`, and `imports`, `exports` and `customSections` are static
+ * methods on the constructor rather than members of an instance. There is therefore no
+ * structural shape to name — one that required a member would refuse the platform's own
+ * type — and naming the `WebAssembly` namespace would make this declaration unreadable
+ * to a program whose lib is `ES2024`, which is where a Node-side isomorphic caller
+ * compiles. `object` is the whole of what the platform type carries and what every real
+ * module is; the module itself is what refuses a value it cannot instantiate.
+ */
+type CompiledModule = object;
+
 /** Synchronous initialization input: a precompiled module or raw WASM bytes. */
-export type SyncInitInput = WebAssembly.Module | ArrayBuffer | ArrayBufferView;
+export type SyncInitInput = ArrayBuffer | ArrayBufferView | CompiledModule;
 
 /** Async initialization input: URL, Request, Response, module, or raw WASM bytes. */
 export type InitInput = string | URL | Request | Response | SyncInitInput;

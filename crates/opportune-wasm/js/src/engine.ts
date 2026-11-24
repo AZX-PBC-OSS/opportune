@@ -35,7 +35,7 @@
 import { wasmModule } from "#wasm";
 
 import { OpportuneError, configurationRejection, reason, rejection } from "./errors.js";
-import { asRecord, documentText, optionsOf, readDocument, utf8Text } from "./json.js";
+import { asPlainRecord, asRecord, documentText, optionsOf, readDocument, typeName, utf8Text } from "./json.js";
 import { translated, type WasmEngine } from "./wasm.js";
 import type {
   Diagnostics,
@@ -126,7 +126,8 @@ export class Engine {
    */
   constructor(limits?: Limits | null) {
     try {
-      const limitsJson = limits == null ? null : documentText(limits, "the limits");
+      const limitsJson =
+        limits == null ? null : documentText(limitsDocument(limits), "the limits");
       const { WasmEngine } = wasmModule();
       this[HANDLE] = translated(() => new WasmEngine(limitsJson));
     } catch (thrown) {
@@ -259,6 +260,30 @@ export class Engine {
   [Symbol.dispose](): void {
     this.free();
   }
+}
+
+/**
+ * `limits` as the plain document the module reads.
+ *
+ * Every field of a limits document is optional, so `{}` is a document the wire reads as
+ * "every field default". A `Map`, a `Set` or an instance of a class carries no own
+ * enumerable member, so `JSON.stringify` writes exactly that and the engine would run
+ * with none of the limits the caller asked for — a bound tightened to one participant
+ * silently becomes the engine's own maximum. Only a plain mapping is written, the shape
+ * {@link limitsWith} and the adapters' options already require, so the mistake leaves as
+ * the rejection a caller can act on rather than as a silent widening of every bound.
+ *
+ * @throws OpportuneError with code `invalid_type`; `Engine` reclassifies it as
+ *   `invalid_limits`, the code its own `@throws` states.
+ */
+function limitsDocument(limits: Limits): Limits {
+  if (asPlainRecord(limits) === undefined) {
+    throw rejection(
+      "invalid_type",
+      `the limits are a document of fields, not a value of type ${typeName(limits)}`,
+    );
+  }
+  return limits;
 }
 
 /**
