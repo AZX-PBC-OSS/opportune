@@ -27,12 +27,12 @@ exclude = ["tests/docs_snippets.rs"]
 # provider-less JSON entry points resolve zone names against that database; an
 # adopter that supplies its own turns it off with `default-features = false` and
 # never carries ~400 KB of zone data it does not read.
-opportune = { path = "../opportune", version = "0.2.1", default-features = false }
+opportune = { path = "../opportune", version = "0.2.2", default-features = false }
 # The wire envelopes reuse the wire layer's block and rule shapes, so a binding
 # generates one model set rather than two spellings of the same value. Default
 # features are off: `schemars` belongs to the `schema` feature alone, and a
 # bundle-size-constrained consumer compiles it out of the graph.
-opportune-json = { path = "../opportune-json", version = "0.2.1", default-features = false, optional = true }
+opportune-json = { path = "../opportune-json", version = "0.2.2", default-features = false, optional = true }
 schemars = { version = "1.2.3", optional = true }
 # Only the provider adapters and the JSON envelopes read a document, so serde is a
 # provider feature rather than an unconditional dependency.

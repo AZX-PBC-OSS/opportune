@@ -22,10 +22,10 @@ crate-type = ["cdylib", "rlib"]
 # The caret requirement is not decoration: cargo-deny's `wildcards = "deny"` rejects
 # a version-free path dependency. It keeps every intra-workspace requirement on this
 # release train, and release-please's TOML updater moves it with the version.
-opportune = { path = "../opportune", version = "0.2.1" }
+opportune = { path = "../opportune", version = "0.2.2" }
 # The published module reads and writes the wire types directly, so schema generation
 # is compiled out: `schemars` stays out of the package a consumer downloads.
-opportune-json = { path = "../opportune-json", version = "0.2.1", default-features = false }
+opportune-json = { path = "../opportune-json", version = "0.2.2", default-features = false }
 # The Graph and Google payload conversions cross the boundary as JSON too, so the
 # binding exposes the adapter entry points rather than re-implementing them here.
 # Default features are off and the providers and the bundled database are named
@@ -33,7 +33,7 @@ opportune-json = { path = "../opportune-json", version = "0.2.1", default-featur
 # `windows-zones` feature reaches, which is what keeps it — and its
 # Unicode-DFS-2016 licence — out of a stripped build, and `bundled-tzdb` is what a
 # module with no filesystem and no caller-supplied database resolves zones against.
-opportune-adapters = { path = "../opportune-adapters", version = "0.2.1", default-features = false, features = [
+opportune-adapters = { path = "../opportune-adapters", version = "0.2.2", default-features = false, features = [
   "graph",
   "google",
   "json",
