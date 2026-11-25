@@ -38,6 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::Engine;
 use crate::error::{Diagnostic, Error};
+use crate::model::Span;
 use crate::model::{Cap, CapPeriod, Part, RangesQuery, RequiredRanges, RuleKind};
 use crate::rules::{REST_REACH_MINUTES, RuleMatcher};
 use crate::time::{Date, Instant, RuleZone, TimeZoneDatabase, Zone, ZoneSchedule};
@@ -85,10 +86,13 @@ pub(crate) fn required_ranges(
     }
     let db = engine.time_zone_database();
 
-    // The padded window: the search window widened by the largest travel and
-    // clearance at each edge and by the booking's duration at the end. Fetching
-    // too much costs a little; fetching too little reads a busy day as free, so
-    // the two widenings add rather than compete.
+    // The padded window: the search window widened by the request-wide travel
+    // envelope — the largest effective travel any request participant needs —
+    // and by the clearance at each edge and the booking's duration at the end.
+    // A default no participant uses widens nothing; every participant still
+    // counts, including attendees and unassigned backup hosts. Fetching too
+    // much costs a little; fetching too little reads a busy day as free, so the
+    // two widenings add rather than compete.
     let mut clearance_before = 0;
     let mut clearance_after = 0;
     let mut has_rest = Vec::with_capacity(query.participants.len());
@@ -104,37 +108,21 @@ pub(crate) fn required_ranges(
         clearance_after = clearance_after.max(clearance.after.max(clearance.min_gap).minutes());
         has_rest.push(!applicable.rests.is_empty());
     }
-    let before = part.travel.largest_before().minutes() + clearance_before;
-    let after = part.duration.minutes() + part.travel.largest_after().minutes() + clearance_after;
-    let padded_start = Instant::from_minutes(
-        query
-            .goal
-            .search_window
-            .start()
-            .minutes()
-            .saturating_sub(before)
-            .max(Instant::MIN.minutes()),
-    )?;
-    let padded_end = Instant::from_minutes(
-        query
-            .goal
-            .search_window
-            .end()
-            .minutes()
-            .saturating_add(after)
-            .min(Instant::MAX.minutes()),
-    )?;
-    let rest_start = Instant::from_minutes(
-        padded_start
-            .minutes()
-            .saturating_sub(REST_REACH_MINUTES)
-            .max(Instant::MIN.minutes()),
-    )?;
-    let rest_end = Instant::from_minutes(
-        padded_end
-            .minutes()
-            .saturating_add(REST_REACH_MINUTES)
-            .min(Instant::MAX.minutes()),
+    let travel_before = part
+        .travel
+        .largest_before_for_participants(&query.participants)
+        .minutes();
+    let travel_after = part
+        .travel
+        .largest_after_for_participants(&query.participants)
+        .minutes();
+    let before = travel_before + clearance_before;
+    let after = part.duration.minutes() + travel_after + clearance_after;
+    let (padded_start, padded_end) = widened_window(query.goal.search_window, before, after)?;
+    let (rest_start, rest_end) = widened_window(
+        query.goal.search_window,
+        before.saturating_add(REST_REACH_MINUTES),
+        after.saturating_add(REST_REACH_MINUTES),
     )?;
 
     let mut earliest = Instant::MAX;
@@ -186,6 +174,26 @@ pub(crate) fn required_ranges(
         calendar,
         occurrences: occurrences_hull(query, db, part)?,
     })
+}
+
+/// The window widened by `before` minutes at its start and `after` at its end,
+/// clamped to the supported range.
+fn widened_window(window: Span, before: i64, after: i64) -> Result<(Instant, Instant), Error> {
+    let start = Instant::from_minutes(
+        window
+            .start()
+            .minutes()
+            .saturating_sub(before)
+            .max(Instant::MIN.minutes()),
+    )?;
+    let end = Instant::from_minutes(
+        window
+            .end()
+            .minutes()
+            .saturating_add(after)
+            .min(Instant::MAX.minutes()),
+    )?;
+    Ok((start, end))
 }
 
 /// The UTC hull of every bucket, of every cap that applies to this request, that

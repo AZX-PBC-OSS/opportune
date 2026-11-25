@@ -13,14 +13,18 @@ use crate::time::{Duration, Grid, GridZone, Instant, TimeOfDay};
 /// A goal with neither a grid nor candidates uses the default grid: the duration
 /// capped at 30 minutes, anchored at 00:00 in the goal's zone.
 ///
-/// A start is left out when its booking, widened by the part's largest travel
-/// either side, reaches past the supported range: every offer reports the span
-/// its booking occupies and the travel to reserve, and the model has no `Span` to
-/// report for a minute past either edge. The envelope is the request-wide one, so
-/// a start any participant's travel could place outside the range is withheld,
-/// whatever assignment the search would choose. An omitted start is left out of
-/// both the offers and the exclusions: nothing about it is bookable, and the range
-/// ending is not a rule the caller wrote.
+/// A start is left out when its booking, widened by the request-wide travel
+/// envelope — the largest effective travel, each participant's override or the
+/// part's travel where they have none, that any request participant needs —
+/// reaches past the supported range: every offer reports the span its booking
+/// occupies and the travel to reserve, and the model has no `Span` to report
+/// for a minute past either edge. The envelope is the request-wide one, so a
+/// start any participant's travel could place outside the range is withheld,
+/// whatever assignment the search would choose; it is narrower than the
+/// part-wide `Travel::largest_before` and `Travel::largest_after`, which fold
+/// the default in even when every participant overrides it. An omitted start is
+/// left out of both the offers and the exclusions: nothing about it is
+/// bookable, and the range ending is not a rule the caller wrote.
 ///
 /// Validation asks whether a request produces more starts than the configured
 /// maximum, so it needs at most one more than that; bounding the walk there keeps
@@ -43,8 +47,10 @@ pub(crate) fn candidate_starts_limited(
             .map_or((Duration::ZERO, Duration::ZERO, Duration::ZERO), |part| {
                 (
                     part.duration,
-                    part.travel.largest_before(),
-                    part.travel.largest_after(),
+                    part.travel
+                        .largest_before_for_participants(&request.participants),
+                    part.travel
+                        .largest_after_for_participants(&request.participants),
                 )
             });
     let representable =

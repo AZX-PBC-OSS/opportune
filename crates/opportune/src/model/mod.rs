@@ -462,10 +462,11 @@ impl RangesQuery {
 /// One UTC envelope of data a request needs.
 ///
 /// `calendar` is the hull every participant's local dates in the padded search
-/// window fall inside, covering blocking events, clearance, part travel and
-/// neighbouring `rest` days. `occurrences` is `None` when no cap applies; when a
-/// cap is present it is the hull of every bucket the search window touches in the
-/// cap's own zone. The engine returns it from
+/// window fall inside, covering blocking events, clearance, the effective travel
+/// of the participants the query names and neighbouring `rest` days.
+/// `occurrences` is `None` when no cap applies; when a cap is present it is the
+/// hull of every bucket the search window touches in the cap's own zone. The
+/// engine returns it from
 /// [`Engine::required_ranges`](crate::Engine::required_ranges).
 ///
 /// # The fetch is two-phase, not one pass
@@ -506,7 +507,8 @@ impl RangesQuery {
 #[non_exhaustive]
 pub struct RequiredRanges {
     /// The UTC range every participant's calendar must cover for availability,
-    /// clearance, part travel and rest.
+    /// clearance, the effective travel of the participants the query names, and
+    /// rest.
     ///
     /// A caller that reports per-block travel ([`Block::travel_before`] and
     /// [`Block::travel_after`]) has to fetch every block whose **occupied** span

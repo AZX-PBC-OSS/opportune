@@ -175,11 +175,13 @@ Build a query with `RangesQuery::new(now, goal)`, then
 `.with_participants(...)` and `.with_rules(...)`; the participants carry no
 calendars, because the planner computes the range before any block is fetched.
 
-`calendar` is the search window padded by the part's travel, clearance, and
-duration, then widened to whole civil days with one day either side, read in
-every zone a participant can be in: a block just outside the window that would
-block the first offered start is included, and so is the neighboring day a
-`rest` rule reads. (If existing calendar blocks carry their own
+`calendar` is the search window padded by the largest travel the query's
+participants actually need — each one's override, or the part's travel where
+they have none — plus clearance and duration, then widened to whole civil days
+with one day either side, read in every zone a participant can be in: a block
+just outside the window that would block the first offered start is included,
+and so is the neighboring day a `rest` rule reads. (If existing calendar
+blocks carry their own
 `travel_before`/`travel_after` longer than the one-day hull margin, fetch events
 whose span plus travel overlaps `calendar`.) `occurrences` is present only when
 a cap applies, and it covers every bucket the search window touches in the cap's
