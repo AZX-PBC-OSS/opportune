@@ -3062,9 +3062,11 @@ SELECT id, participant_id, event_key, span, status, all_day, tags,
   FROM calendar_blocks
  WHERE participant_id = ANY($request_participant_ids)
    AND event_key = ANY($observed_keys);
+-- Occurrences are request-global: do not participant-filter this closure. One
+-- naming only people outside the request still overrides a same-key block's
+-- span and participants, and dropping it would charge that block separately.
 SELECT id, event_key, span, participants, tags FROM occurrences
- WHERE participants && $request_participant_ids
-   AND event_key = ANY($observed_keys);
+ WHERE event_key = ANY($observed_keys);
 
 -- 4. Union the initial and closure rows, deduplicating by stable provider record
 --    identity ((participant_id, id) for blocks, id for occurrences), never by

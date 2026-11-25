@@ -1612,3 +1612,66 @@ fn closure_preserves_same_key_record_identity_and_request_order() {
         "closure must retain every same-key record in request order, without key deduplication"
     );
 }
+
+/// Occurrences are request-global and may name only people outside the request.
+/// Once a participant's in-hull block observes their key, closure must retain the
+/// occurrence: its authoritative participant list still suppresses the block's
+/// participant, even though none of the occurrence's own names are request IDs.
+#[test]
+fn closure_retains_an_occurrence_naming_only_participants_outside_the_request() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![keyed_block(
+        Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+        "evt_external",
+        true,
+    )]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_external",
+            Span::new(utc(day, 10, 0), utc(day, 11, 0)).expect("a span"),
+            vec!["external".to_owned()],
+        )
+        .expect("an occurrence may name someone outside the request"),
+    );
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert_closed_matches_full(&outcome);
+    assert_eq!(
+        outcome.closed_request.occurrences, request.occurrences,
+        "closure must not participant-filter the authoritative occurrence away"
+    );
+    assert_eq!(
+        outcome.full.offers.len(),
+        1,
+        "the occurrence names no request participant, so the event counts for nobody"
+    );
+
+    // The reachable failure a participant-scoped occurrence closure produces:
+    // without the occurrence, its same-key block becomes a standalone event on
+    // ana and silently fills her cap instead.
+    let mut participant_filtered = outcome.closed_request.clone();
+    participant_filtered.occurrences.clear();
+    let filtered = engine()
+        .find_availability(&participant_filtered)
+        .expect("the filtered control request is valid");
+    assert!(
+        filtered.offers.is_empty(),
+        "dropping the authoritative occurrence falsely charges the block to ana"
+    );
+    assert!(
+        !slot_answer(&participant_filtered, candidate, &["ana"]).0,
+        "the same false exclusion reaches confirmation"
+    );
+}
