@@ -157,6 +157,136 @@ pub fn limit_workloads(engine: &Engine) -> [Workload; 2] {
     ]
 }
 
+/// The zone-period counts the `adversarial` benchmark group measures.
+///
+/// The largest is the engine's default `max_zone_periods_per_participant`, so the
+/// group spans the most fragmented schedule a valid request can carry.
+pub const REST_ZONE_PERIOD_SIZES: [usize; 6] = [32, 64, 128, 256, 512, 1_000];
+
+/// The zone the rest-scaling participant is normally in: no daylight saving, so
+/// its local reading is plain arithmetic on the home clock.
+const REST_SCALING_HOME: &str = "UTC";
+
+/// The far side of the date line from [`REST_SCALING_HOME`]: UTC+14, thirteen to
+/// fourteen hours ahead of the home clock.
+const REST_SCALING_EAST: &str = "Pacific/Kiritimati";
+
+/// The near side of the date line from [`REST_SCALING_HOME`]: UTC-12, twelve hours
+/// behind the home clock.
+const REST_SCALING_WEST: &str = "Etc/GMT+12";
+
+/// Where a day's evening legs begin, in home-clock minutes: 05:30, which is 19:30
+/// in [`REST_SCALING_EAST`]'s reading of the day and 17:30 in
+/// [`REST_SCALING_WEST`]'s reading of the day before it.
+const REST_SCALING_EVENING_START: u16 = 5 * 60 + 30;
+
+/// How many minutes of a day's home-clock morning carry evening legs: three and
+/// a half hours, keeping both leg zones' readings inside their local evening.
+const REST_SCALING_EVENING_MINUTES: usize = 210;
+
+/// Where a day's morning legs begin, in home-clock minutes: 12:00, which is
+/// 00:00 in [`REST_SCALING_WEST`]'s reading of the day and 02:00 in
+/// [`REST_SCALING_EAST`]'s reading of the day after it.
+const REST_SCALING_MORNING_START: u16 = 12 * 60;
+
+/// How many minutes of a day's home-clock afternoon carry morning legs: eight
+/// hours, keeping both leg zones' readings inside their local morning.
+const REST_SCALING_MORNING_MINUTES: usize = 8 * 60;
+
+/// How many consecutive days carry each kind of leg, either side of the day the
+/// search starts on.
+const REST_SCALING_DAYS: i64 = 3;
+
+/// The `rest` self-conflict workload at `zone_periods` zone periods: one
+/// participant whose clock shuttles across the date line, so the rule's late and
+/// early minute sets are cut into many segments per local date.
+///
+/// The participant is in UTC and takes one-minute legs that alternate between
+/// `Pacific/Kiritimati` (UTC+14) and `Etc/GMT+12` (UTC-12). Half the legs sit in
+/// the home clock's 05:30-09:00, where UTC+14 reads the same date's evening and
+/// UTC-12 reads the previous date's; half sit in its 12:00-20:00, where UTC-12
+/// reads the same date's morning and UTC+14 reads the date after's. Because the
+/// legs alternate zones, consecutive minutes read as different local dates, so
+/// `rest` pairs many late segments with many early segments per date pair rather
+/// than a handful.
+///
+/// Nothing else varies with `zone_periods`: one participant, one `rest` rule, one
+/// candidate start and a fixed five-hour booking, so the measurement is the cost
+/// of reading that schedule and not of searching.
+///
+/// # Panics
+/// Panics when a leg zone is missing from the database or a leg's instants leave
+/// the supported range, which no size in [`REST_ZONE_PERIOD_SIZES`] does.
+#[must_use]
+pub fn rest_zone_period_workload(engine: &Engine, zone_periods: usize) -> Request {
+    let db = engine.time_zone_database();
+    let day = first_day();
+    let home = zone_name(REST_SCALING_HOME);
+    let mut participant = Participant::new("rich", home.clone());
+    participant.zone_periods = rest_zone_periods(db, day, zone_periods);
+
+    let start = local(db, REST_SCALING_HOME, day, 9 * 60);
+    let search = Span::new(start, local(db, REST_SCALING_HOME, day, 11 * 60))
+        .expect("the rest-scaling search window is non-empty");
+    let mut goal = Goal::single(
+        home,
+        search,
+        Duration::from_minutes(5 * 60),
+        Requirement::new(vec![Term::person("rich")]),
+    );
+    goal.candidates = Some(vec![start]);
+    let mut request = Request::new(local(db, REST_SCALING_HOME, day, 0), goal);
+    request.participants.push(participant);
+    request.rules = vec![presets::rest(time(17 * 60 + 30), time(10 * 60))];
+    request.explain = Some(Explain::new(1_000));
+    request
+}
+
+/// The alternating legs of [`rest_zone_period_workload`], in any order: the
+/// evening legs first, then the morning ones.
+fn rest_zone_periods(db: &TimeZoneDatabase, day: Date, zone_periods: usize) -> Vec<ZonePeriod> {
+    let zones = [zone_name(REST_SCALING_EAST), zone_name(REST_SCALING_WEST)];
+    // Half the legs read as an evening, on `day - 1`, `day` and `day + 1`; the
+    // other half read as a morning, on `day`, `day + 1` and `day + 2`.
+    let ours = [zone_periods.div_ceil(2), zone_periods / 2];
+    let windows = [
+        (
+            REST_SCALING_EVENING_START,
+            REST_SCALING_EVENING_MINUTES,
+            -1_i64,
+        ),
+        (
+            REST_SCALING_MORNING_START,
+            REST_SCALING_MORNING_MINUTES,
+            0_i64,
+        ),
+    ];
+    let mut periods = Vec::with_capacity(zone_periods);
+    for ((first_minute, minutes, day_offset), mut wanted) in windows.into_iter().zip(ours) {
+        for index in 0..REST_SCALING_DAYS {
+            let date = day
+                .plus_days(day_offset + index)
+                .expect("a rest-scaling leg day is a date");
+            for slot in 0..minutes {
+                if wanted == 0 {
+                    break;
+                }
+                let minute = first_minute + u16::try_from(slot).expect("a window fits a day");
+                periods.push(
+                    ZonePeriod::new(
+                        zones[slot % zones.len()].clone(),
+                        local(db, REST_SCALING_HOME, date, minute),
+                        local(db, REST_SCALING_HOME, date, minute + 1),
+                    )
+                    .expect("a one-minute leg is non-empty"),
+                );
+                wanted -= 1;
+            }
+        }
+    }
+    periods
+}
+
 /// How the bounded-limit workloads differ from the base benchmark shape.
 #[derive(Clone, Copy, Default)]
 struct Variant {

@@ -16,14 +16,23 @@
 //! the blocks; the two `limits` benchmarks against each other, identical but for the
 //! offer limit, grow when the post-limit feasibility check does.
 //!
+//! The `adversarial` group is one participant whose zone periods shuttle across the
+//! date line, at each size in [`REST_ZONE_PERIOD_SIZES`]. Only the schedule grows
+//! with the size, so the readings show how `rest`'s self-conflict construction
+//! scales with the number of late and early segments per date; a build that pairs
+//! them off one against another grows quadratically against the size.
+//!
 //! Run them with `cargo bench -p opportune-testkit`, or with `-- --quick` for a
 //! smoke run. CI does not measure them: a shared runner moves absolute
 //! milliseconds further than a change to this code does, so the readings are taken
 //! by hand and recorded against the latency targets.
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use opportune::Engine;
-use opportune_testkit::workloads::{limit_workloads, slot_workload, spec_workloads};
+use opportune_testkit::workloads::{
+    REST_ZONE_PERIOD_SIZES, limit_workloads, rest_zone_period_workload, slot_workload,
+    spec_workloads,
+};
 
 fn engine() -> Engine {
     Engine::builder()
@@ -55,6 +64,26 @@ fn search(c: &mut Criterion) {
     group.finish();
 }
 
+fn adversarial(c: &mut Criterion) {
+    let engine = engine();
+    let mut group = c.benchmark_group("adversarial");
+    for zone_periods in REST_ZONE_PERIOD_SIZES {
+        let request = rest_zone_period_workload(&engine, zone_periods);
+        group.bench_with_input(
+            BenchmarkId::from_parameter(zone_periods),
+            &request,
+            |bencher, request| {
+                bencher.iter(|| {
+                    engine
+                        .find_availability(request)
+                        .expect("the rest-scaling workload is a valid request")
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 fn limits(c: &mut Criterion) {
     let engine = engine();
     let mut group = c.benchmark_group("limits");
@@ -71,5 +100,5 @@ fn limits(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, search, limits);
+criterion_group!(benches, search, limits, adversarial);
 criterion_main!(benches);

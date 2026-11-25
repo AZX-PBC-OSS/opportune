@@ -7,15 +7,16 @@
 //! than an empty page, and that the bounded-limit and confirm-time workloads
 //! measure what their names claim.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use opportune::Engine;
 use opportune::model::{CapPer, CapPeriod, Request, Rule, RuleKind, Span};
 use opportune::reasons::ReasonCode;
-use opportune::time::{Duration, GridZone, Instant, RuleZone};
+use opportune::time::{Date, Duration, GridZone, Instant, RuleZone, ZonePeriod, ZoneSchedule};
 use opportune_testkit::workloads::{
-    DENSE_EXTRA_BLOCKS_PER_DAY, GRID_STEP_MINUTES, PARTICIPANTS, TRUNCATED_LIMIT, WINDOW_DAYS,
-    Workload, limit_workloads, slot_workload, spec_workloads,
+    DENSE_EXTRA_BLOCKS_PER_DAY, GRID_STEP_MINUTES, PARTICIPANTS, REST_ZONE_PERIOD_SIZES,
+    TRUNCATED_LIMIT, WINDOW_DAYS, Workload, limit_workloads, rest_zone_period_workload,
+    slot_workload, spec_workloads,
 };
 
 fn engine() -> Engine {
@@ -402,4 +403,178 @@ fn the_bounded_limit_workloads_are_dense_and_truncate() {
     assert_eq!(cut.offers.len(), TRUNCATED_LIMIT);
     assert_eq!(cut.dates, full.dates);
     assert_eq!(cut.excluded, full.excluded);
+}
+
+/// How many separate segments of the rule's late minutes and of its early minutes
+/// each local date holds.
+#[derive(Clone, Copy, Debug, Default)]
+struct Segments {
+    /// Runs of consecutive minutes at or after 17:30 local.
+    late: usize,
+    /// Runs of consecutive minutes before 10:00 local.
+    early: usize,
+}
+
+/// One segment per run of consecutive minutes that share a local date and the same
+/// late/early classification under the rule bounded by `late_after` and
+/// `not_before`: the unit `rest` pairs one date's late minutes against the next
+/// date's early minutes in.
+///
+/// Counted from the participant's own clock rather than through the engine's
+/// interval construction, so the count says what the schedule carries and not what
+/// the code under measurement made of it. A run the zone walk would split again at
+/// a zone-period boundary counts once here, so these counts are a lower bound on
+/// the segments `rest` reads.
+fn segments_per_date(
+    schedule: &ZoneSchedule,
+    from: i64,
+    until: i64,
+    late_after: u16,
+    not_before: u16,
+) -> BTreeMap<Date, Segments> {
+    let mut counts: BTreeMap<Date, Segments> = BTreeMap::new();
+    let mut run: Option<(Date, bool, bool)> = None;
+    for minute in from..until {
+        let instant = Instant::from_minutes(minute)
+            .expect("the workload's reach is inside the supported range");
+        let local = schedule.zone_at(instant).zoned(instant);
+        let date = local.date();
+        let time = local.time().minute_of_day();
+        let late = time >= late_after;
+        let early = time < not_before;
+        if run != Some((date, late, early)) {
+            let segments = counts.entry(date).or_default();
+            if late {
+                segments.late += 1;
+            }
+            if early {
+                segments.early += 1;
+            }
+            run = Some((date, late, early));
+        }
+    }
+    counts
+}
+
+/// The rest-scaling workload's participant schedule, resolved the way the engine
+/// resolves it.
+fn participant_schedule(engine: &Engine, request: &Request) -> ZoneSchedule {
+    let db = engine.time_zone_database();
+    let participant = &request.participants[0];
+    let periods = participant
+        .zone_periods
+        .iter()
+        .map(|period| {
+            ZonePeriod::new(
+                db.zone(period.zone().as_str())
+                    .unwrap_or_else(|err| panic!("`{err}`: a workload zone is in the database")),
+                period.from(),
+                period.until(),
+            )
+            .expect("a workload leg is non-empty")
+        })
+        .collect();
+    ZoneSchedule::new(
+        db.zone(participant.zone.as_str())
+            .expect("the workload's home zone is in the database"),
+        periods,
+    )
+    .expect("the workload's legs are disjoint")
+}
+
+/// The rest-scaling workload carries the shape its measurement claims: the
+/// schedule cuts the rule's late and early minutes into many segments per local
+/// date, so the number of late/early pairs `rest` reads per date pair grows far
+/// faster than the size does. A workload that let its legs spread evenly over the
+/// dates, or that stopped alternating zones, would measure nothing.
+#[test]
+fn the_rest_scaling_workload_carries_many_late_and_early_segments_per_day() {
+    let engine = engine();
+
+    // The most late/early pairs any one date pair presents, per size.
+    let mut pairs = Vec::new();
+    for zone_periods in REST_ZONE_PERIOD_SIZES {
+        let request = rest_zone_period_workload(&engine, zone_periods);
+        assert!(
+            engine.validate(&request).errors.is_empty(),
+            "{zone_periods} zone periods is a valid request: {:?}",
+            engine.validate(&request).errors
+        );
+        assert_eq!(
+            request.participants[0].zone_periods.len(),
+            zone_periods,
+            "every leg the size asks for is in the schedule"
+        );
+
+        // Three days either side of the search window, so every date the legs
+        // land on and the home windows around them are counted.
+        let rest = request.rules[0]
+            .rest()
+            .expect("the rest-scaling workload's only rule is a rest rule");
+        let schedule = participant_schedule(&engine, &request);
+        let day = 24 * 60;
+        let window = request.goal.search_window;
+        let segments = segments_per_date(
+            &schedule,
+            window.start().minutes() - 3 * day,
+            window.end().minutes() + 4 * day,
+            rest.late_after.minute_of_day(),
+            rest.not_before.minute_of_day(),
+        );
+
+        // The legs land on more than one date, so the fragments really are the
+        // date line moving the reading, not one long daily window.
+        assert!(
+            segments.len() >= 4,
+            "{zone_periods}: the legs read as several local dates: {segments:?}"
+        );
+
+        // `self_conflict_spans` pairs `late(D)` with `early(D + 1)`, so the day
+        // pair with the most segments on each side is what the workload makes.
+        let best = segments
+            .iter()
+            .filter_map(|(date, late)| {
+                let next = date.plus_days(1).ok()?;
+                Some(late.late * segments.get(&next)?.early)
+            })
+            .max()
+            .unwrap_or(0);
+        let late_peak = segments.values().map(|of| of.late).max().unwrap_or(0);
+        let early_peak = segments.values().map(|of| of.early).max().unwrap_or(0);
+        assert!(
+            late_peak >= zone_periods / 8 && early_peak >= zone_periods / 8,
+            "{zone_periods}: each side carries many segments on one date: \
+             late peak {late_peak}, early peak {early_peak}"
+        );
+        assert!(
+            best >= (zone_periods / 2) * (zone_periods / 2) / 16,
+            "{zone_periods}: the busiest date pair presents {best} late/early pairs"
+        );
+        if zone_periods
+            == *REST_ZONE_PERIOD_SIZES
+                .last()
+                .expect("the sizes are non-empty")
+        {
+            // The workload is a live search, not an inert schedule: the one
+            // candidate start is offered.
+            let response = engine
+                .find_availability(&request)
+                .expect("the rest-scaling workload is a valid request");
+            assert_eq!(
+                response.offers.len(),
+                1,
+                "{zone_periods}: the start is offered"
+            );
+        }
+        pairs.push(best);
+    }
+
+    // Quadratically more pairs for about thirty times the legs: an evenly spread
+    // schedule would have grown linearly.
+    let smallest = pairs.first().copied().expect("the sizes are non-empty");
+    let largest = pairs.last().copied().expect("the sizes are non-empty");
+    assert!(
+        largest >= smallest * 8,
+        "the pairs per date pair grow faster than the sizes do: {pairs:?}"
+    );
 }
