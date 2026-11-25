@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/AZX-PBC-OSS/opportune/compare/v0.2.1...v0.2.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **deps:** refresh dependency versions ([494ef89](https://github.com/AZX-PBC-OSS/opportune/commit/494ef89c7ab69f1bb35a53b23cc06e8e371eaddd))
+
 ## [0.2.1](https://github.com/AZX-PBC-OSS/opportune/compare/v0.2.0...v0.2.1) (2026-11-25)
 
 
