@@ -250,6 +250,37 @@ impl Engine {
     /// assert!(ranges.occurrences.is_none());
     /// # }
     /// ```
+    ///
+    /// The returned hulls start the documented two-phase fetch, not a one-pass
+    /// query: a cap merges every record sharing an event key across all supplied
+    /// time ranges. Fetch the initial calendar and occurrence hulls — every block
+    /// whose occupied span, its own span widened by its travel, overlaps
+    /// `calendar`, and every occurrence and block whose own span overlaps
+    /// `occurrences` — observe the event keys on every participant's own-span
+    /// occurrence-range records, then fetch every record carrying one of those
+    /// keys, on every participant, including all-day and otherwise nonmatching
+    /// records. `Request::occurrences` is one request-global list: never filter it
+    /// by the participants an occurrence names. Evaluate the closed request against
+    /// a consistent provider snapshot.
+    ///
+    /// The hulls cover only instants inside the query's `goal.search_window`, but
+    /// `check_slot` ignores that window. To confirm a start outside it, call
+    /// `required_ranges` again with a query whose `goal.search_window` contains the
+    /// proposed start and repeat the same initial fetch and event-key closure;
+    /// reusing the search's hulls can read a blocked minute or a spent cap as free.
+    ///
+    /// A one-pass fetch is key-complete only when every copy of an event has the
+    /// identical own span; otherwise a same-key record outside the hull can produce
+    /// a false offer or a false exclusion. When exact closure is unavailable, fetch
+    /// all occurrences and blocks across the full supported time domain
+    /// (`Span::EVERYTHING`) with [`crate::Limits`] raised to cover it — raise
+    /// `max_blocks_per_participant` and `max_occurrences` with
+    /// [`crate::Limits::with_max_blocks_per_participant`] and
+    /// [`crate::Limits::with_max_occurrences`], because the published defaults can
+    /// refuse that fetch with `blocks_limit` or `occurrences_limit` — or fail
+    /// closed by returning an error instead of evaluating a narrowed request; no
+    /// engine call fails closed. [`RequiredRanges`] carries the whole contract.
+    ///
     /// # Errors
     /// Returns [`Error::PartCount`] for a goal that does not have exactly one
     /// part, [`Error::InvalidRequest`] carrying the same findings the request
@@ -400,6 +431,14 @@ pub fn validate(request: &Request) -> Diagnostics {
 
 /// The data a request needs, using a default engine with the bundled database
 /// and default limits.
+///
+/// The returned hulls begin the two-phase fetch [`Engine::required_ranges`]
+/// documents: fetch the initial calendar and occurrence hulls, then every record
+/// carrying an event key observed on an own-span occurrence-range record, or fetch
+/// the full supported time domain with [`crate::Limits`] raised to cover it or fail
+/// closed. They cover only instants inside the query's `goal.search_window`; a
+/// confirmation outside it needs a new query whose window contains the proposed
+/// start and the same initial fetch and event-key closure.
 ///
 /// # Errors
 /// Returns [`crate::time::TimeError::TzdbBundledUnavailable`] wrapped in an

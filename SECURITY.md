@@ -16,4 +16,4 @@ We will acknowledge receipt and coordinate a fix and disclosure timeline through
 
 - **Operator diagnostics are not public availability data.** `Response.warnings`, `Response.excluded`, `OfferEvent.eligible`/`assignment`/`reserve`, and `SlotCheck.reasons`/`warnings` contain internal host IDs, rule IDs, and calendar details. On public booking endpoints, force `explain` unset and project answers through `public_response` / `public_slot_check` (Python) or `publicResponse` / `publicSlotCheck` (TypeScript).
 - **Enforce HTTP request body limits at the proxy or middleware boundary.** `Engine` limits bound parsed scheduling structures, not raw HTTP payload decoding.
-- **Keep confirmation atomic.** `check_slot` is pure and stateless; pair it with a database transaction or unique constraint when committing a booking.
+- **`check_slot` is a pure, stateless predicate.** It reads and writes no store, so its answer is only as fresh as the data it is given. Callers must supply current bookings and travel holds as calendar data and own concurrency; otherwise a stale request can confirm an unavailable slot.

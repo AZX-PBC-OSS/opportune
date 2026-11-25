@@ -98,6 +98,22 @@ impl Engine {
     /// The calendar and occurrence data a ranges query needs, as a JSON
     /// `RequiredRanges`.
     ///
+    /// The normal path is an initial fetch — every block whose occupied span, its
+    /// own span widened by its travel, overlaps `calendar`, plus every occurrence
+    /// and block whose own span overlaps `occurrences` — followed by event-key
+    /// closure: observe the keys on every participant's own-span occurrence-range
+    /// records, then fetch every record carrying one of those keys on every
+    /// participant. Occurrences are one request-global list, never filtered by the
+    /// participants they name.
+    ///
+    /// The hulls cover only instants inside the query's goal search window, so a
+    /// confirmation outside it needs a new query whose window contains the proposed
+    /// start and the same initial fetch and event-key closure. When exact closure is
+    /// impossible, fetch the full supported time domain with limits raised to cover
+    /// it (`max_blocks_per_participant` and `max_occurrences`) or fail closed by
+    /// returning an error rather than evaluating narrowed data. See `RequiredRanges`
+    /// in `opportune` for the whole contract.
+    ///
     /// # Errors
     /// Returns [`JsonError`] when the query document is rejected.
     pub fn required_ranges_json(&self, query_json: &str) -> Result<String, JsonError> {

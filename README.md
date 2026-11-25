@@ -93,7 +93,7 @@ response = opportune.find_availability(request)
 print(opportune.offer_start(response.offers[0]), opportune.offer_end(response.offers[0]))
 ```
 
-Requests and responses are generated Pydantic v2 models that plug directly into FastAPI routes. Build and reuse one `opportune.Engine` — every call releases the GIL around Rust execution — and use `opportune.adapters.graph` / `opportune.adapters.google` to convert provider payloads. See [`docs/api.md`](docs/api.md#python) for the FastAPI lifespan and `*_async` pattern, Postgres rule upgrades, adapter helpers, and benchmarks.
+Requests and responses are generated Pydantic v2 models that plug directly into FastAPI routes. Build and reuse one `opportune.Engine` — every call releases the GIL around Rust execution — and use `opportune.adapters.graph` / `opportune.adapters.google` to convert provider payloads. See [`docs/api.md`](docs/api.md#python) for the FastAPI lifespan and `*_async` pattern, stored-document upgrades, adapter helpers, and benchmarks.
 
 ## TypeScript / JavaScript
 
@@ -131,7 +131,7 @@ See [`docs/wasm.md`](docs/wasm.md) for runtime requirements, the JSON fast path,
 
 Full documentation publishes to [azx-pbc-oss.github.io/opportune](https://azx-pbc-oss.github.io/opportune/):
 
-- [`docs/recipes.md`](docs/recipes.md) — nine scenarios worked through in Rust, Python, and TypeScript, plus the production blueprints for booking commits, weighted dispatch, occurrences, and multi-tenant engines (start here for a booking product).
+- [`docs/recipes.md`](docs/recipes.md) — nine scenarios worked through in Rust, Python, and TypeScript, plus integration notes on occurrences, weighting, fetch planning, and engine lifecycle (start here for scheduling rules and integration patterns).
 - [`docs/api.md`](docs/api.md) — Rust core, JSON wire format, provider adapters, and Python/FastAPI reference.
 - [`docs/wasm.md`](docs/wasm.md) — npm package, TypeScript types, adapters, and WASM bundle-size budget.
 - [`docs/design.md`](docs/design.md) — core design principles and semantics.

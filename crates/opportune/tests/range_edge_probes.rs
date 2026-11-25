@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 
 use opportune::Engine;
 use opportune::model::{
-    Block, Explain, Goal, Participant, ParticipantTravel, Proposal, ProposalEvent, Request,
-    Requirement, Rule, RuleKind, Span, Term, Travel,
+    Block, Explain, Goal, Participant, ParticipantTravel, Proposal, ProposalEvent, RangesQuery,
+    Request, Requirement, Rule, RuleKind, Span, Term, Travel,
 };
 use opportune::presets;
 use opportune::reasons::ReasonCode;
@@ -930,6 +930,325 @@ fn the_candidate_limit_counts_only_starts_the_envelope_can_represent() {
         codes.contains(&"candidates_limit"),
         "the withheld starts must not shrink the count below the maximum: {codes:?}"
     );
+}
+
+/// A part's default travel every request participant overrides away must not
+/// withhold the first supported instant: the request-wide envelope is each
+/// participant's effective travel, and with every override zero a booking at
+/// `Instant::MIN` needs no travel at all — while an unused default used to push
+/// both the explicit candidate and the first grid start off the range.
+#[test]
+fn a_default_every_participant_overrides_away_offers_the_first_supported_instant() {
+    let engine = engine();
+    let travel = Travel::new(Duration::from_minutes(1), Duration::ZERO).with_participant(
+        "rich",
+        Duration::ZERO,
+        Duration::ZERO,
+    );
+
+    let request = candidate_request(
+        Instant::MIN,
+        travel.clone(),
+        vec![host("rich", "UTC", Vec::new())],
+        Vec::new(),
+    );
+    let response = engine.find_availability(&request).unwrap();
+    let starts: Vec<Instant> = response
+        .offers
+        .iter()
+        .filter_map(opportune::Offer::start)
+        .collect();
+    assert_eq!(
+        starts,
+        vec![Instant::MIN],
+        "the unused default withholds nothing: {starts:?}"
+    );
+    let check = engine
+        .check_slot(&request, &assignment(Instant::MIN, &["rich"]))
+        .unwrap();
+    assert!(check.valid, "{:?}", check.reasons);
+    assert!(check.reserve.is_empty());
+
+    // The grid path: the first start the bounded walk offers is the window's
+    // first minute, not one the unused default pushed inward.
+    let mut goal = Goal::single(
+        name("UTC"),
+        span(
+            Instant::MIN,
+            Instant::from_minutes(Instant::MIN.minutes() + 3 * 60).unwrap(),
+        ),
+        Duration::from_minutes(30),
+        Requirement::new(vec![Term::person("rich")]),
+    );
+    goal.candidates = None;
+    goal.parts[0].travel = travel;
+    let mut request = Request::new(Instant::MIN, goal);
+    request.participants = vec![host("rich", "UTC", Vec::new())];
+    let response = engine.find_availability(&request).unwrap();
+    let starts: Vec<Instant> = response
+        .offers
+        .iter()
+        .filter_map(opportune::Offer::start)
+        .collect();
+    assert_eq!(
+        starts.first(),
+        Some(&Instant::MIN),
+        "the grid's first start is the first supported minute: {starts:?}"
+    );
+    for start in &starts {
+        let check = engine
+            .check_slot(&request, &assignment(*start, &["rich"]))
+            .unwrap();
+        assert!(check.valid, "{start:?}: {:?}", check.reasons);
+    }
+}
+
+/// The mirror at the last supported instant: a default after-travel every
+/// participant overrides to zero leaves the last explicit candidate and the last
+/// grid start bookable, and every offer confirms with no travel to reserve.
+#[test]
+fn a_default_every_participant_overrides_away_offers_the_last_supported_instant() {
+    let engine = engine();
+    let top = Instant::MAX.minutes();
+    let at = |minutes: i64| Instant::from_minutes(minutes).unwrap();
+    let travel = Travel::new(Duration::ZERO, Duration::from_minutes(1)).with_participant(
+        "rich",
+        Duration::ZERO,
+        Duration::ZERO,
+    );
+
+    let request = candidate_request(
+        at(top - 30),
+        travel.clone(),
+        vec![host("rich", "UTC", Vec::new())],
+        Vec::new(),
+    );
+    let response = engine.find_availability(&request).unwrap();
+    let starts: Vec<Instant> = response
+        .offers
+        .iter()
+        .filter_map(opportune::Offer::start)
+        .collect();
+    assert_eq!(
+        starts,
+        vec![at(top - 30)],
+        "the unused default withholds nothing: {starts:?}"
+    );
+    let check = engine
+        .check_slot(&request, &assignment(at(top - 30), &["rich"]))
+        .unwrap();
+    assert!(check.valid, "{:?}", check.reasons);
+    assert!(check.reserve.is_empty());
+
+    let mut goal = Goal::single(
+        name("UTC"),
+        span(at(top - 3 * 60), Instant::MAX),
+        Duration::from_minutes(30),
+        Requirement::new(vec![Term::person("rich")]),
+    );
+    goal.candidates = None;
+    goal.parts[0].travel = travel;
+    let mut request = Request::new(Instant::MIN, goal);
+    request.participants = vec![host("rich", "UTC", Vec::new())];
+    let response = engine.find_availability(&request).unwrap();
+    let starts: Vec<Instant> = response
+        .offers
+        .iter()
+        .filter_map(opportune::Offer::start)
+        .collect();
+    assert_eq!(
+        starts.last(),
+        Some(&at(top - 30)),
+        "the last grid start is bookable: {starts:?}"
+    );
+    for start in &starts {
+        let check = engine
+            .check_slot(&request, &assignment(*start, &["rich"]))
+            .unwrap();
+        assert!(check.valid, "{start:?}: {:?}", check.reasons);
+    }
+}
+
+/// An attendee who inherits the part's default travel — no override of their own
+/// — still widens the request-wide envelope when every host overrides theirs to
+/// zero: their travel is occupied time, so the search withholds what it pushes
+/// past the edge and the confirmation names them.
+#[test]
+fn an_attendee_who_inherits_the_default_still_widens_the_envelope() {
+    let engine = engine();
+    let top = Instant::MAX.minutes();
+    let at = |minutes: i64| Instant::from_minutes(minutes).unwrap();
+    let travel = Travel::new(Duration::ZERO, Duration::from_minutes(60)).with_participant(
+        "primary",
+        Duration::ZERO,
+        Duration::ZERO,
+    );
+    let participants = vec![
+        host("primary", "UTC", Vec::new()),
+        Participant::attendee("zoe", name("UTC")),
+    ];
+
+    let request = candidate_request(at(top - 30), travel, participants, Vec::new());
+    let response = engine.find_availability(&request).unwrap();
+    assert!(
+        response.offers.is_empty(),
+        "the attendee's inherited default travel withholds the start: {:?}",
+        response
+            .offers
+            .iter()
+            .filter_map(opportune::Offer::start)
+            .collect::<Vec<_>>()
+    );
+    let err = out_of_range(&engine, &request, &assignment(at(top - 30), &["primary"]));
+    assert!(
+        err.to_string().contains("zoe"),
+        "the attendee whose inherited travel crossed is named: {err}"
+    );
+}
+
+/// The fetch envelope is request-wide too: a day of default travel no request
+/// participant uses does not widen `required_ranges`' calendar hull, while an
+/// attendee who inherits the default widens it by exactly one local day either
+/// side, and an empty participant list falls back to the part-wide maximum.
+#[test]
+fn a_default_no_participant_uses_does_not_widen_the_fetch_envelope() {
+    let engine = engine();
+    let day = Instant::MIN.minutes() + 100 * 24 * 60;
+    let at = |minutes: i64| Instant::from_minutes(minutes).unwrap();
+    let window = span(at(day), at(day + 23 * 60));
+    let default = Duration::from_minutes(24 * 60);
+    let goal = |travel: Travel| {
+        let mut goal = Goal::single(
+            name("UTC"),
+            window,
+            Duration::from_minutes(30),
+            Requirement::new(vec![Term::person("rich")]),
+        );
+        goal.parts[0].travel = travel;
+        goal
+    };
+    let query = |goal: &Goal, participants: Vec<Participant>| {
+        RangesQuery::new(Instant::MIN, goal.clone())
+            .with_participants(participants)
+            .with_rules(vec![presets::cap_per_day(Selector::True, 10)])
+    };
+
+    // The host overrides the default away in both directions: the hull covers
+    // the padded window and its neighbouring days, nothing more.
+    let overridden =
+        Travel::new(default, default).with_participant("rich", Duration::ZERO, Duration::ZERO);
+    let narrow = engine
+        .required_ranges(&query(
+            &goal(overridden.clone()),
+            vec![host("rich", "UTC", Vec::new())],
+        ))
+        .unwrap();
+
+    // The same host keeping the default widens the hull by exactly one local
+    // day either side — the widening the overridden request must not inherit.
+    let kept = overridden
+        .clone()
+        .with_participant("rich", default, default);
+    let wide = engine
+        .required_ranges(&query(&goal(kept), vec![host("rich", "UTC", Vec::new())]))
+        .unwrap();
+    assert!(narrow.occurrences.is_some());
+    assert_eq!(
+        narrow.occurrences, wide.occurrences,
+        "travel changes only the calendar hull, never a cap's occurrence hull"
+    );
+    assert_eq!(
+        narrow.calendar.start().minutes() - wide.calendar.start().minutes(),
+        24 * 60,
+        "the unused default does not widen the hull's start"
+    );
+    assert_eq!(
+        wide.calendar.end().minutes() - narrow.calendar.end().minutes(),
+        24 * 60,
+        "the unused default does not widen the hull's end"
+    );
+
+    // An attendee who inherits the default while the host overrides it away
+    // widens the fetch envelope exactly as the host keeping it did.
+    let inherited = engine
+        .required_ranges(&query(
+            &goal(overridden),
+            vec![
+                host("rich", "UTC", Vec::new()),
+                Participant::attendee("zoe", name("UTC")),
+            ],
+        ))
+        .unwrap();
+    assert_eq!(inherited.calendar.start(), wide.calendar.start());
+    assert_eq!(inherited.calendar.end(), wide.calendar.end());
+
+    // With no participant to read, the fallback is the part-wide maximum,
+    // default and override map alike: the exact padded window, unrestricted by
+    // any zone's day rounding.
+    let empty = engine
+        .required_ranges(&query(&goal(Travel::new(default, default)), Vec::new()))
+        .unwrap();
+    assert_eq!(
+        empty.calendar,
+        span(at(day - 24 * 60), at(day + 23 * 60 + 30 + 24 * 60))
+    );
+}
+
+/// Narrowing the fetch envelope must not drop rest activity that still excludes
+/// an overridden, zero-travel booking. The older late block lies only in the
+/// default-inflated hull and is stripped; the recent one remains necessary.
+#[test]
+fn an_overridden_fetch_envelope_preserves_rest_exclusions_after_stripping() {
+    let engine = engine();
+    let day = Instant::MIN.minutes() + 100 * 24 * 60;
+    let at = |minutes: i64| Instant::from_minutes(minutes).unwrap();
+    let start = at(day + 9 * 60);
+    let default = Duration::from_minutes(24 * 60);
+    let travel =
+        Travel::new(default, default).with_participant("rich", Duration::ZERO, Duration::ZERO);
+    let old = block(
+        at(day - 7 * 24 * 60 + 18 * 60),
+        at(day - 7 * 24 * 60 + 19 * 60),
+    );
+    let recent = block(at(day - 24 * 60 + 18 * 60), at(day - 24 * 60 + 19 * 60));
+    let request = candidate_request(
+        start,
+        travel,
+        vec![host("rich", "UTC", vec![old, recent])],
+        vec![presets::rest(
+            TimeOfDay::new(18, 0).unwrap(),
+            TimeOfDay::new(10, 0).unwrap(),
+        )],
+    );
+    let query = RangesQuery::new(request.now, request.goal.clone())
+        .with_participants(request.participants.clone())
+        .with_rules(request.rules.clone());
+    let ranges = engine.required_ranges(&query).unwrap();
+
+    let full = engine.find_availability(&request).unwrap();
+    assert!(full.offers.is_empty());
+    assert_eq!(full.excluded[0].reasons[0].code, ReasonCode::Rest);
+
+    let mut stripped = request.clone();
+    for participant in &mut stripped.participants {
+        if let Some(blocks) = &mut participant.calendar {
+            blocks.retain(|block| {
+                block.span.start() < ranges.calendar.end()
+                    && ranges.calendar.start() < block.span.end()
+            });
+        }
+    }
+    assert_eq!(
+        stripped.participants[0].blocks().len(),
+        1,
+        "only the default-inflated day's block is removed: calendar {:?}, retained {:?}",
+        ranges.calendar,
+        stripped.participants[0].blocks()
+    );
+    let fetched = engine.find_availability(&stripped).unwrap();
+    assert_eq!(fetched.offers, full.offers);
+    assert_eq!(fetched.excluded, full.excluded);
+    assert_eq!(fetched.dates, full.dates);
 }
 
 /// A cap still decides a confirmation whose search window is longer than the

@@ -397,8 +397,12 @@ impl Travel {
         }
     }
 
-    /// The largest travel before the event across the part's participants,
-    /// which is how far the padded range reaches back.
+    /// The largest travel before the event across every travel the part
+    /// defines: the part's default folded together with every participant
+    /// override, so it includes the default even when every participant
+    /// overrides it. That conservativeness is what the judged range pads by; a
+    /// search's request-wide envelope is narrower, folding only the effective
+    /// travel of the participants a request actually names.
     #[must_use]
     pub fn largest_before(&self) -> Duration {
         self.by_participant
@@ -407,13 +411,48 @@ impl Travel {
             .fold(self.before, Duration::max)
     }
 
-    /// The largest travel after the event across the part's participants.
+    /// The largest travel after the event across every travel the part
+    /// defines: the part's default folded together with every participant
+    /// override, so it includes the default even when every participant
+    /// overrides it. That conservativeness is what the judged range pads by; a
+    /// search's request-wide envelope is narrower, folding only the effective
+    /// travel of the participants a request actually names.
     #[must_use]
     pub fn largest_after(&self) -> Duration {
         self.by_participant
             .values()
             .map(|travel| travel.after)
             .fold(self.after, Duration::max)
+    }
+
+    /// The largest effective travel before the event across `participants`,
+    /// each read through [`Travel::for_participant`]: an override replaces the
+    /// part's travel for the participant who holds it, so a default nobody
+    /// names widens nothing. An empty slice falls back to
+    /// [`Travel::largest_before`], the travel the part could still need when no
+    /// participant narrows it.
+    pub(crate) fn largest_before_for_participants(&self, participants: &[Participant]) -> Duration {
+        match participants.split_first() {
+            None => self.largest_before(),
+            Some((first, rest)) => rest.iter().fold(
+                self.for_participant(first.id.as_str()).0,
+                |largest, participant| largest.max(self.for_participant(participant.id.as_str()).0),
+            ),
+        }
+    }
+
+    /// The largest effective travel after the event across `participants`, each
+    /// read through [`Travel::for_participant`]. An empty slice falls back to
+    /// [`Travel::largest_after`], the travel the part could still need when no
+    /// participant narrows it.
+    pub(crate) fn largest_after_for_participants(&self, participants: &[Participant]) -> Duration {
+        match participants.split_first() {
+            None => self.largest_after(),
+            Some((first, rest)) => rest.iter().fold(
+                self.for_participant(first.id.as_str()).1,
+                |largest, participant| largest.max(self.for_participant(participant.id.as_str()).1),
+            ),
+        }
     }
 }
 
@@ -533,5 +572,80 @@ mod tests {
         );
         assert_eq!(travel.largest_before(), Duration::from_minutes(35));
         assert_eq!(travel.largest_after(), Duration::from_minutes(40));
+    }
+
+    /// The judged-range methods remain conservative when the shared default is
+    /// larger than every override, rather than taking only the override map's
+    /// maximum.
+    #[test]
+    fn part_wide_travel_includes_a_default_larger_than_every_override() {
+        let travel = Travel::new(Duration::from_minutes(35), Duration::from_minutes(40))
+            .with_participant("tom", Duration::ZERO, Duration::ZERO);
+
+        assert_eq!(travel.largest_before(), Duration::from_minutes(35));
+        assert_eq!(travel.largest_after(), Duration::from_minutes(40));
+        assert_eq!(
+            travel.largest_before_for_participants(&[Participant::new(
+                "tom",
+                ZoneName::new("UTC").unwrap(),
+            )]),
+            Duration::ZERO
+        );
+        assert_eq!(
+            travel.largest_after_for_participants(&[Participant::new(
+                "tom",
+                ZoneName::new("UTC").unwrap(),
+            )]),
+            Duration::ZERO
+        );
+    }
+
+    /// The request-wide envelope folds each request participant's effective
+    /// travel; with no participants it falls back to the part-wide maximum,
+    /// which folds the default in with every override map entry.
+    #[test]
+    fn the_request_wide_envelope_falls_back_to_the_part_wide_maximum_without_participants() {
+        let travel = Travel::new(Duration::from_minutes(1), Duration::from_minutes(2))
+            .with_participant(
+                "tom",
+                Duration::from_minutes(35),
+                Duration::from_minutes(40),
+            );
+
+        assert_eq!(
+            travel.largest_before_for_participants(&[]),
+            travel.largest_before()
+        );
+        assert_eq!(
+            travel.largest_after_for_participants(&[]),
+            travel.largest_after()
+        );
+        assert_eq!(travel.largest_before(), Duration::from_minutes(35));
+        assert_eq!(travel.largest_after(), Duration::from_minutes(40));
+
+        // A participant without an override contributes the part default.
+        let solo = [Participant::new("ana", ZoneName::new("UTC").unwrap())];
+        assert_eq!(
+            travel.largest_before_for_participants(&solo),
+            Duration::from_minutes(1)
+        );
+        assert_eq!(
+            travel.largest_after_for_participants(&solo),
+            Duration::from_minutes(2)
+        );
+
+        // An override replaces the default for the participant who holds it.
+        let both = [
+            solo[0].clone(),
+            Participant::new("tom", ZoneName::new("UTC").unwrap()),
+        ];
+        assert_eq!(
+            travel.largest_before_for_participants(&both),
+            Duration::from_minutes(35)
+        );
+        assert_eq!(
+            travel.largest_after_for_participants(&both),
+            Duration::from_minutes(40)
+        );
     }
 }

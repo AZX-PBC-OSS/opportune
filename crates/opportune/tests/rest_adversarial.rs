@@ -682,3 +682,103 @@ fn rest_at_the_supported_range_edge_is_judged_with_a_clamped_window() {
         first_codes(&response)
     );
 }
+
+#[test]
+fn a_booking_self_conflicts_through_a_clock_that_crosses_the_date_line() {
+    // The host is in UTC, with sixty short legs across the date line either side
+    // of the booking so the rule's late and early minutes are cut into many
+    // segments, and two legs inside the booking below:
+    //
+    // * Monday 06:00Z-06:05Z in Etc/GMT+12 (UTC-12) reads as Sunday 18:00-18:05,
+    //   which is `late(Sunday)`.
+    // * Monday 06:05Z-06:10Z in Etc/GMT+3 (UTC-3) reads as Monday 03:05-03:10,
+    //   which is `early(Monday)`.
+    //
+    // A ten-minute booking from Monday 06:00Z therefore reaches both halves of
+    // one `(D, D + 1)` pair and excludes itself, although its two sides are
+    // minutes of a Sunday evening and a Monday morning that only the legs put
+    // next to each other. A booking entirely in the home clock's own Monday
+    // morning reaches no late minute and is offered.
+    let mut participant = host("rich", Vec::new());
+    // Sunday's legs fragment the local readings the booking's Sunday evening
+    // comes from; Monday's sit after it, where UTC-12 still reads a Sunday
+    // evening and UTC+14 reads a Monday one, and the home minutes between them
+    // read a Monday morning.
+    let groups = [
+        (utc(MONDAY, 0, 0).minutes() - 24 * 60, 30_i64, 10),
+        (utc(MONDAY, 7, 0).minutes(), 30_i64, 6),
+    ];
+    for (base, legs, pitch) in groups {
+        for leg in 0..legs {
+            let from = base + leg * pitch;
+            let zone = if leg % 2 == 0 {
+                "Etc/GMT+12"
+            } else {
+                "Pacific/Kiritimati"
+            };
+            participant.zone_periods.push(
+                ZonePeriod::new(
+                    ZoneName::new(zone).expect("a zone name"),
+                    Instant::from_minutes(from).expect("a leg start is in range"),
+                    Instant::from_minutes(from + 3).expect("a leg end is in range"),
+                )
+                .expect("the fixture leg is non-empty"),
+            );
+        }
+    }
+    for (zone, from, until) in [
+        ("Etc/GMT+12", utc(MONDAY, 6, 0), utc(MONDAY, 6, 5)),
+        ("Etc/GMT+3", utc(MONDAY, 6, 5), utc(MONDAY, 6, 10)),
+    ] {
+        participant.zone_periods.push(
+            ZonePeriod::new(ZoneName::new(zone).expect("a zone name"), from, until)
+                .expect("the fixture leg is non-empty"),
+        );
+    }
+
+    let crossing = utc(MONDAY, 6, 0);
+    let at_home = utc(MONDAY, 5, 0);
+    let request = request(
+        utc(MONDAY, 0, 0),
+        span(utc(MONDAY, 4, 0), utc(MONDAY, 7, 0)),
+        vec![crossing, at_home],
+        10,
+        Travel::default(),
+        vec![participant],
+        vec![evening_rest()],
+    );
+    assert!(
+        engine().validate(&request).errors.is_empty(),
+        "the fixture's legs are disjoint: {:?}",
+        engine().validate(&request).errors
+    );
+    let response = engine().find_availability(&request).unwrap();
+    assert_eq!(
+        offered(&response),
+        vec![at_home],
+        "the booking crossing the date line excludes itself; the one inside the \
+         home morning does not"
+    );
+    assert_eq!(
+        first_codes(&response),
+        vec![(crossing, ReasonCode::Rest)],
+        "and it reports the rest code"
+    );
+
+    // A confirmation judges the same booking through the same construction, so
+    // it must reject the slot the search excluded.
+    let proposal = Proposal {
+        events: vec![ProposalEvent {
+            part: "main".to_owned(),
+            start: crossing,
+            assignment: vec![vec!["rich".to_owned()]],
+        }],
+    };
+    let check = engine().check_slot(&request, &proposal).unwrap();
+    assert!(
+        !check.valid,
+        "the crossing booking is not confirmable: {:?}",
+        check.reasons
+    );
+    assert_eq!(check.reasons[0].code, ReasonCode::Rest);
+}

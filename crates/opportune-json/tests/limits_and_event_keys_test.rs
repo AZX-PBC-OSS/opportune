@@ -150,9 +150,9 @@ fn a_nine_field_limits_document_takes_the_zone_period_default() {
 
 #[test]
 fn an_explicit_null_for_an_added_limit_represents_the_engine_default() {
-    // A binding that writes every key, or a document read back from a JSONB column,
-    // puts an explicit `null` where a human would leave the field out; every limit
-    // reads it as the default, as every other defaulted wire field does.
+    // A binding that writes every key, or a document read back from a stored JSON
+    // document, puts an explicit `null` where a human would leave the field out; every
+    // limit reads it as the default, as every other defaulted wire field does.
     let document = r#"{
       "max_participants": null,
       "max_blocks_per_participant": null,

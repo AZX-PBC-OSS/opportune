@@ -160,14 +160,15 @@ These are deliberate v1 limits, not bugs to work around:
 
 ### `required_ranges` and the caller's fetch responsibility
 
-The engine never fetches anything. `required_ranges` takes the request's `now`,
-goal, rule list and participants and answers which calendar and occurrence data
-the caller has to have before the search:
+The engine never fetches anything. Call `required_ranges` before a search or a
+confirmation when the request can be capped or calendars come from a provider; it
+takes the request's `now`, goal, rule list and participants and answers which
+calendar and occurrence data has to be loaded:
 
 ```rust
 pub struct RequiredRanges {
     pub calendar: Span,          // UTC range every participant's calendar must cover
-    pub occurrences: Option<Span>, // the occurrence range, `None` when no cap applies
+    pub occurrences: Option<Span>, // initial occurrence-range fetch, `None` when no cap applies
 }
 ```
 
@@ -175,20 +176,85 @@ Build a query with `RangesQuery::new(now, goal)`, then
 `.with_participants(...)` and `.with_rules(...)`; the participants carry no
 calendars, because the planner computes the range before any block is fetched.
 
-`calendar` is the search window padded by the part's travel, clearance, and
-duration, then widened to whole civil days with one day either side, read in
-every zone a participant can be in: a block just outside the window that would
-block the first offered start is included, and so is the neighboring day a
-`rest` rule reads. (If existing calendar blocks carry their own
-`travel_before`/`travel_after` longer than the one-day hull margin, fetch events
-whose span plus travel overlaps `calendar`.) `occurrences` is present only when
-a cap applies, and it covers every bucket the search window touches in the cap's
-own zone — those days for a per-day cap, and the whole weeks or months they fall
-in for the longer periods. **Because caps count both `occurrences` and matching
-calendar blocks, fetch cap-counted calendar blocks over the union of `calendar`
-and `occurrences` whenever `occurrences` is present.** (`RangesQuery.now` is
-carried for wire symmetry with `Request` and does not clip the fetch hull.) Data
-outside these ranges (subject to block-travel overlap) cannot change the answer.
+**What the hulls cover.** `calendar` is the search window padded by the largest
+travel the query's participants actually need — each one's override, or the part's
+travel where they have none — plus clearance and duration, then widened to whole
+civil days with one day either side, read in every zone a participant can be in: a
+block just outside the window that would block the first offered start is
+included, and so is the neighboring day a `rest` rule reads. (If existing calendar
+blocks carry their own `travel_before`/`travel_after` longer than the one-day hull
+margin, fetch events whose span plus travel overlaps `calendar`.) `occurrences` is
+present only when a cap applies, and it covers every bucket the search window
+touches in the cap's own zone — those days for a per-day cap, and the whole weeks
+or months they fall in for the longer periods. (`RangesQuery.now` is carried for
+wire symmetry with `Request` and does not clip the fetch hull.)
+
+**Normal path: an initial fetch, then event-key closure.** A cap merges every
+record sharing an `event_key` across all supplied time ranges, so the hulls start
+a two-phase fetch, not a one-pass query. When `occurrences` is present:
+
+1. **Initial fetch.** Fetch every block whose occupied span — its span widened by
+   its `travel_before`/`travel_after` — overlaps `calendar`, and every occurrence
+   and calendar block whose own span overlaps `occurrences`, on **every** request
+   participant. Do not prefilter by the cap's `count` tags, a block's status, or
+   `all_day`. `Request.occurrences` is one request-global list, not a
+   per-participant one: never filter it by the participants an occurrence names.
+   One naming only people outside the request still overrides a same-key block's
+   span and participants, and dropping it charges that block separately.
+2. **Observe keys.** Collect the deduplicated event keys of every record from
+   step 1 whose own span overlaps `occurrences` — every occurrence and every
+   calendar block, on every participant.
+3. **Event-key closure.** Fetch every occurrence and every block carrying one of
+   those keys, on every request participant, across the supported time domain —
+   all-day and otherwise nonmatching records included. Deduplicate by provider
+   record identity, never by event key.
+4. **Evaluate the closed request.** Judge the search or confirmation against that
+   request and a consistent provider snapshot.
+
+The out-of-hull copies matter because cap matching unions an occurrence's tags
+with every same-key block's. A later same-key block extends a minutes-capped
+event and can cause a **false offer**; an earlier one moves a count-capped event
+to another bucket and can cause a **false exclusion**; an all-day or otherwise
+nonmatching block on another participant can supply the tag that brings an event
+into the cap's `count`.
+
+**Edge case: a confirmation outside the search window.** Both hulls are planned
+from `goal.search_window` and cover only instants inside it. `check_slot`
+deliberately ignores that window, so confirming a rescheduled or dragged start
+outside it needs a new `RangesQuery` whose `goal.search_window` contains that
+instant, followed by the same initial fetch and event-key closure. Reusing the
+search's hulls strips every record the window did not touch, which can confirm a
+spent cap or a blocked minute as free.
+
+**Edge case: exact closure is unavailable.** A single-pass fetch is key-complete
+only under a caller-enforced invariant: **every occurrence and block sharing an
+event key has the identical own span**. Per-instance keys alone are not enough
+when split copies can carry different spans. If exact closure cannot be completed,
+fetch **all occurrences and blocks across the full supported time domain**
+(`Span::EVERYTHING`, `1975-01-01T00:00Z..2100-01-01T00:00Z`) **with `Limits` raised
+to cover it** — raise `max_blocks_per_participant` and `max_occurrences` with
+`Limits::with_max_blocks_per_participant` and
+`Limits::with_max_occurrences`, because the published defaults (10,000 and 50,000)
+refuse that fetch with `blocks_limit` or `occurrences_limit` on a calendar large
+enough to need it — or fail closed. Failing closed means the caller's own entry
+point returns an error instead of evaluating a narrowed request as partial cap
+data; the engine cannot detect a partial fetch, so no engine call fails closed.
+Never evaluate partial cap data as an empty workload. The full supported domain is
+a fallback data requirement, not a replacement for the narrow `occurrences` hull.
+Data outside the closed fetch — records with unobserved keys — cannot change the
+answer; data outside the hulls that shares an observed key can.
+
+> **Caller action required.** Callers using caps must implement the two-phase
+> fetch above, or enforce the identical-own-span invariant, before relying on
+> `RequiredRanges`. A one-pass fetch can change offers, exclusions and date
+> counts.
+
+Direct Graph and Google callers face the same requirement: closure pages need the
+same completeness — follow every page and query by the observed event keys. When
+the provider has no exact key lookup, use the documented full-domain fallback
+with `Limits` raised to cover it (`max_blocks_per_participant` and
+`max_occurrences`), or fail closed by returning an error rather than evaluating
+narrowed data.
 
 `required_ranges` does not require a prior `validate`: a query whose goal is not
 exactly one part is refused with `Error::PartCount`, and a query whose participant
@@ -341,9 +407,14 @@ and clamp an application-computed score before inserting it.
 `Request::occurrences` is how a shared event is counted once for a pooled cap:
 one `Occurrence` carries the event's `event_key`, `span`, `participants` and
 `tags`, and every participant's calendar block with that key is treated as the
-same event. Build it with `Occurrence::new(key, span, participants)` and attach
-tags with `Occurrence::with_tags`; `required_ranges` reports the bucket hull the
-caller must fetch as `occurrences`. See [the occurrence blueprint](recipes.md#counting-a-shared-event-once)
+same event. The occurrence is authoritative for the span and participants, while
+the event's tags are the **union** of the occurrence's and every same-key
+block's, so a block can bring the event into a cap's `count` even when the
+occurrence carries no matching tag. Build it with
+`Occurrence::new(key, span, participants)` and attach tags with
+`Occurrence::with_tags`; `required_ranges` reports the initial bucket hull as
+`occurrences`, and the caller must then close over the observed event keys as
+described above. See [the occurrence blueprint](recipes.md#counting-a-shared-event-once)
 for the whole pattern.
 
 `Request::calendars` names the `CalendarSpec`s a `LeadTimeMax::WorkingDays` horizon
@@ -519,11 +590,15 @@ an assigned host or an attendee needs, reaches past `Instant::MIN` or
 withholds such a start from its offers and its exclusions instead, using the
 request-wide travel envelope, so every offer it returns confirms.
 
-`check_slot` is pure and stateless: it verifies a proposed booking against fresh
-calendar and occurrence data (catching stale availability), but does not lock rows or
-serialize concurrent writers. Pair it with a database transaction or unique constraint
-on booked spans when committing a reservation. [The booking-commit blueprint](recipes.md#committing-a-booking-atomically)
-works the transaction, ordered locking and write-back.
+`check_slot` is a fresh predicate, not a lock: it judges the proposal against the
+calendar and occurrence data in the request it is given. The caller owns
+persistence, concurrency and write-back. Because the engine cannot see records it
+was not given, any already-committed booking or travel hold must be supplied back
+as calendar data — a block over the booked span, and the offer's `reserve` spans
+as the holds — before the next check. A confirmation outside the goal's
+`search_window` needs a new `RangesQuery` whose window contains the proposed
+start, followed by the same initial fetch and event-key closure. [The engine-level
+integration contract](recipes.md#confirming-a-proposal) describes that boundary.
 
 ### Typed errors and diagnostics
 
@@ -585,6 +660,10 @@ the longest booking, travel or clearance in minutes (`max_duration_minutes`,
 which also bounds a block's own `travel_before`/`travel_after`).
 `Limits::default()` is the published default; a caller that needs larger inputs
 supplies its own, and every one of the ten has a `with_` builder.
+`max_candidate_starts` counts the starts a grid search can represent under the
+request-wide travel envelope — a request whose participants override a large
+default away counts more starts than one that keeps it — while an explicit
+`goal.candidates` list is counted by its declared length.
 
 ### `opportune::VERSION`
 
@@ -629,7 +708,8 @@ deserialized as a field of its own request body, say — converts it directly wi
 the same field pointers a parse failure reports. The records a service caches
 on their own convert the same way — `Participant::try_from(&wire_participant)`,
 `Block::try_from(&wire_block)` and `Occurrence::try_from(&wire_occurrence)` — so a
-calendar row read back from JSONB becomes the domain value without a second parse. The answer types
+calendar record read back from a stored JSON document becomes the domain value
+without a second parse. The answer types
 (`WireResponse`, `WireSlotCheck`, `WireDiagnostics`, `WireRequiredRanges`) read
 back from JSON too, so a Rust HTTP client deserializes the engine's answer, and
 an additive field from a newer engine does not fail the read.
@@ -705,7 +785,7 @@ know.
 the schema version it was written with, validate it against that version's
 meaning, and return the current version's canonical JSON. A version this build
 does not read is rejected with `unsupported_schema_version` rather than
-misread — see the Python section below for the Postgres-stored rule pattern.
+misread — see the Python section below for the stored-document upgrade pattern.
 
 ## Provider adapters (`opportune-adapters`)
 
@@ -952,9 +1032,10 @@ one directly.
 
 Requests and answers are the generated Pydantic v2 models, so a FastAPI route
 declares them directly and a caller stores them with
-`model_dump_json(by_alias=True, exclude_none=True)` — the wire spelling, ready for
-Postgres `jsonb` — and reads them back with `Model.model_validate_json`. A dump
-carries the same values the Rust serializer writes, in the schema's field order
+`model_dump_json(by_alias=True, exclude_none=True)` — the wire spelling, ready to
+persist as a JSON document — and reads them back with
+`Model.model_validate_json`. A dump carries the same values the Rust serializer
+writes, in the schema's field order
 rather than the serializer's declaration order, so compare a Python dump against
 Rust's bytes by value and not by digest.
 
@@ -992,7 +1073,7 @@ both helpers raise `pydantic.ValidationError` for a value the model rejects.
 - **Loosening tiers (`opportune.unless` / `opportune.presets.unless`):** Returns a rule with a selector excluded from `when` so a narrower tier can loosen a broader rule instead of intersecting to empty. Passing `True` excludes every booking, causing `validate` to report `when_matches_no_part`.
 - **Human-only hosts (`opportune.presets.and_who` / `except_who`):** The participant-side twins of `unless`, also exported as `opportune.and_who` / `opportune.except_who`. They narrow `who` by intersection rather than replacing it, so `presets.and_who(presets.business_hours(), {"kind": "person"})` keeps the default `{"role": "host"}` clause beside the kind clause and reaches human hosts alone — not attendees, not resource rooms. `presets.except_who(presets.cap_per_day({"tag": "interview"}, 2), {"ids": ["ceo"]})` exempts the CEO while every other host stays subject. Passing `who={"kind": "person"}` to a builder instead replaces the default outright and also matches attendees.
 - **Rescheduling:** Pass `Request(exclude_event_keys=[...])` to ignore the event being moved during blocking, rest, and cap evaluation.
-- **Shared events (`Request(occurrences=[...])`):** Build `Occurrence(event_key=..., span=..., participants=[...])` once for a multi-participant event so a pooled cap counts it once; `Occurrence.tags` (or `with_updates(occurrence, tags=[...])`) is what a cap's `count` selector sees.
+- **Shared events (`Request(occurrences=[...])`):** Build `Occurrence(event_key=..., span=..., participants=[...])` once for a multi-participant event so a pooled cap counts it once. A cap's `count` selector sees the union of `Occurrence.tags` (settable with `with_updates(occurrence, tags=[...])`) and every same-key block's tags.
 - **Public route projections:** `opportune.public_response(response: Response | Mapping[str, object])` and `opportune.public_slot_check(check: SlotCheck | Mapping[str, object])` return `PublicResponse` / `PublicSlotCheck`, dropping operator-only fields (`warnings`, `excluded`, `excluded_truncated`, each offer's `eligible`/`assignment`/`reserve`, and a slot check's `reasons`, `reserve`, and `warnings`). Each helper reads the model or the document it was stored or received as — a mapping read back from a cache, queue, or JSON column — and rejects a malformed document with `OpportuneError` code `invalid_argument` naming the field, never a raw `AttributeError` or `pydantic.ValidationError`. The full `Response` and `SlotCheck` stay unchanged for operator routes; public booking routes must explicitly project through `public_response` / `public_slot_check` to avoid leaking internal host IDs, rules, or calendar details.
 - **Single-part sugar (`opportune.sugar`):** `single_goal` (supports `display_zone`, `grid`, `candidates`, `part_id`, `tags`, and `travel`), `person`, `at_least`, and `offer_start`, `offer_end`, `offer_assigned_hosts`, `offer_calendar_unknown`, `offer_reserve`, and `offer_to_proposal` (accepting either an `Offer` model or a raw dict). Sugar builds the standard models with no parallel semantics.
 
@@ -1077,7 +1158,7 @@ that matters is hundreds of kilobytes, not megabytes. Pair the cap with the
 engine's own `max_participants`, `max_blocks_per_participant` and `max_rules` so a
 body that fits the cap still cannot ask for unbounded work.
 
-### Stored rules: upgrades from Postgres
+### Stored rules: schema upgrades
 
 Rules a caller stores carry the schema version they were written with, and
 `upgrade_rule`, `upgrade_calendar` and `upgrade_goal` rewrite them for this build.
@@ -1086,32 +1167,27 @@ They take and return JSON text, because the document is what was stored:
 <!-- snippet: api-python-stored-rules -->
 ```python
 import json
-from typing import Any, cast
+from typing import cast
 
 from pydantic import TypeAdapter
 
 import opportune
 
 
-db: Any = ...  # the application's asyncpg pool
-
-
-async def load_rule(rule_id: str) -> dict[str, object]:
-    row = await db.fetchrow(
-        "SELECT document, schema_version FROM rules WHERE id = $1", rule_id
-    )
-    # Validates against the version the rule was written with and returns the
-    # current version's canonical JSON; an unreadable version raises
+def load_rule(document: str, schema_version: int) -> dict[str, object]:
+    # `document` is the stored JSON text and `schema_version` the version it was
+    # written with. `upgrade_rule` validates it against that version and returns
+    # the current version's canonical JSON; an unreadable version raises
     # OpportuneError with code `unsupported_schema_version`.
-    upgraded = opportune.upgrade_rule(row["document"], row["schema_version"])
+    upgraded = opportune.upgrade_rule(document, schema_version)
     TypeAdapter(opportune.Rule).validate_json(upgraded)
     return cast(dict[str, object], json.loads(upgraded))
 ```
 
-Run the upgrade in the migration that reads the row, write the canonical form and
-the new version back, and the row stops needing upgrading.
+Run the upgrade when a stored document is loaded, write the canonical form and
+the new version back, and it stops needing upgrading.
 
-A `TypeAdapter` failure carries no HTTP body, so pass the document the row holds when
+A `TypeAdapter` failure carries no HTTP body, so pass the stored document when
 you build the envelope — `opportune.error_envelope_from_validation_error(refused,
 document=json.loads(upgraded))` — and its findings' pointers resolve in that
 document, exactly as a body's do. That is what reads a stored document as *itself*:

@@ -19,9 +19,9 @@
 //! deserialized one as a field of its own request body, converts it without writing
 //! it back to JSON text. The records a service caches on their own convert the same
 //! way — `Participant::try_from(&WireParticipant)`, `Block::try_from(&WireBlock)` and
-//! `Occurrence::try_from(&WireOccurrence)` — so a calendar row read back from JSONB
-//! becomes the domain value without a second parse. [`to_json`] writes any wire value
-//! back out, deterministically:
+//! `Occurrence::try_from(&WireOccurrence)` — so a calendar record read back from a
+//! stored JSON document becomes the domain value without a second parse. [`to_json`]
+//! writes any wire value back out, deterministically:
 //! maps are ordered, and every required field is always present.
 //! Parsing never evaluates a request, so a name the engine cannot resolve — an
 //! unknown zone or calendar — is [`Engine::validate`]'s finding rather than a parse
@@ -445,6 +445,26 @@ pub fn validate(engine: &Engine, request_json: &str) -> Result<String, JsonError
 /// assert!(ranges.starts_with(r#"{"calendar":"#), "{ranges}");
 /// # }
 /// ```
+///
+/// The hulls start a two-phase fetch, not a one-pass query. The normal path is an
+/// initial fetch — every block whose occupied span, its own span widened by its
+/// travel, overlaps `calendar`, plus every occurrence and block whose own span
+/// overlaps `occurrences` — followed by event-key closure: observe the keys on
+/// every participant's own-span occurrence-range records, then fetch every record
+/// carrying one of those keys on every participant, all-day and otherwise
+/// nonmatching records included. `occurrences` is one request-global list, never
+/// filtered by the participants an occurrence names. Judge the closed request
+/// against a consistent provider snapshot.
+///
+/// The hulls cover only instants inside the query's `goal.search_window`; a
+/// confirmation outside it needs a new query whose window contains the proposed
+/// start, followed by the same initial fetch and event-key closure. A one-pass
+/// fetch is key-complete only when every copy of an event has the identical own
+/// span; otherwise fetch all occurrences and blocks across the full supported time
+/// domain with `Limits` raised to cover it (`max_blocks_per_participant` and
+/// `max_occurrences`), or fail closed by returning an error instead of evaluating a
+/// narrowed request. The Rust `RequiredRanges` documentation carries the whole
+/// contract.
 ///
 /// # Errors
 /// Returns [`JsonError`] when the document is rejected, as

@@ -1526,11 +1526,11 @@
       "type": "object"
     },
     "RequiredRanges": {
-      "description": "One UTC envelope of data a request needs.",
+      "description": "One UTC envelope of data a request needs.\n\nAsk for this before a search or a confirmation when the request can be capped\nor calendars come from a provider. `calendar` is the hull the search window's\ncivil days cover; `occurrences` is the hull of the cap buckets the window\ntouches, or absent when no cap applies.\n\nThe hulls start a two-phase fetch, not a one-pass query: a cap merges every\nrecord sharing an event key across all supplied time ranges. **Initial fetch:**\nevery block whose occupied span — its own span widened by its travel — overlaps\n`calendar`, and every occurrence and block whose own span overlaps\n`occurrences`. **Event-key closure:** collect the event keys observed on those\nown-span occurrence-range records, then fetch every record carrying one of those\nkeys on every participant, all-day and otherwise nonmatching records included,\nand judge that closed request against a consistent snapshot. `occurrences` is one\nrequest-global list: fetch every occurrence, never filtering by the participants\none names.\n\n**Confirmation outside the search window:** the hulls cover only instants inside\nthe goal's `search_window`, but `check_slot` ignores that window. Confirming a\nstart outside it needs a new ranges query whose window contains the start,\nfollowed by the same initial fetch and event-key closure.\n\n**Exact closure unavailable:** a one-pass fetch is key-complete only when every\ncopy of an event has the identical own span; otherwise fetch the full supported\ntime domain with limits raised to cover it (`max_blocks_per_participant` and\n`max_occurrences`), or fail closed by returning an error rather than evaluating\nnarrowed data. See the Rust `RequiredRanges` documentation for the whole\ncontract.",
       "properties": {
         "calendar": {
           "$ref": "#/$defs/Span",
-          "description": "The UTC range every participant's calendar must cover."
+          "description": "The UTC range every participant's calendar must cover, planned from the\ngoal's `search_window`.\n\nFetch every block whose occupied span — the block's own span widened by its\n`travel_before` and `travel_after` — overlaps this range, not only blocks\nwhose own span does: a block ending before the range can still occupy a\nminute inside it. A confirmation outside the search window needs a new\nranges query whose window contains the confirmed start."
         },
         "occurrences": {
           "anyOf": [
@@ -1541,7 +1541,7 @@
               "type": "null"
             }
           ],
-          "description": "The UTC range occurrence data must cover, or absent when no cap applies.\n\nAn omitted field and an explicit `null` both read as no occurrence range;\nthe field is omitted rather than written as `null`, matching every other\noptional response field."
+          "description": "The UTC range of the initial occurrence-range fetch, or absent when no cap\napplies.\n\nFetch every occurrence and every calendar block whose own span overlaps it,\non every participant, and never filter occurrences by the participants\nthey name: the list is request-global. Then perform the event-key closure:\nfetch every record carrying a key observed on those own-span\noccurrence-range records, on every participant, and evaluate the closed\nrequest. An omitted field and an explicit `null` both read as no occurrence\nrange; the field is omitted rather than written as `null`, matching every\nother optional response field. When that closure cannot be completed, fetch\nthe full supported time domain with `Limits` raised to cover it — raise\n`max_blocks_per_participant` and `max_occurrences`, because the published\ndefaults can refuse that fetch — or fail closed: the caller's own entry\npoint returns an error instead of evaluating narrowed data."
         }
       },
       "required": [

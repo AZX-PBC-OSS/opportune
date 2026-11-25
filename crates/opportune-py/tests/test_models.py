@@ -531,10 +531,11 @@ def test_a_model_carrying_none_on_every_list_answers_as_the_field_omitted() -> N
     """A `null` list a caller's mapper wrote is the empty list, at the request's own sites.
 
     `participants`, `rules`, `occurrences`, `exclude_event_keys`, `calendars` and
-    `weights` are the defaulted fields a stored request read back from a JSONB column
-    spells as `null`, and six of that column's keys are not ones a populated request can
-    also null — so they need the empty document. A `null` that emptied the participant
-    list rather than failing to read is what the unknown participant in the goal proves:
+    `weights` are the defaulted fields a request read back from a stored JSON
+    document spells as `null`, and six of that document's keys are not ones a
+    populated request can also null — so they need the empty document. A `null` that
+    emptied the participant list rather than failing to read is what the unknown
+    participant in the goal proves:
     the document parsed, it simply names nobody.
     """
     engine = Engine()

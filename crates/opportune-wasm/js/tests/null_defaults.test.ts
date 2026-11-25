@@ -3,8 +3,8 @@
  * strict compile.
  *
  * A JSON mapping that fills every key in — several do — writes an explicit `null`
- * where a human would leave a field out, and a request read back from a JSONB
- * column is the common case: the database returns what the mapper stored. So the
+ * where a human would leave a field out, and a request read back from a stored JSON
+ * document is the common case: the store returns what the mapper stored. So the
  * generated request type has to accept those nulls with no cast, and the engine
  * has to answer the document it already answers without them.
  *

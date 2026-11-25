@@ -1,34 +1,44 @@
-//! Differential probe for the occurrence hull a participant-zone cap needs.
+//! Differential probes for the two halves of a cap's fetch closure.
 //!
-//! A cap buckets an existing event by the date its own start reads in the zone in
-//! force at that instant, not by the zone in force during the search window. Two
-//! instants the participant reads in different zones can therefore share one
-//! bucket: a booking during a leg and an existing event after the participant is
-//! home again, later in the same day, week or month. This probe builds that shape
-//! from the outside in — a leg over the window, a candidate inside it and a
-//! counted event outside it whose own-zone label matches — and checks the two
-//! things the range answer promises: the returned occurrence hull contains the
-//! counted event, and removing data outside the returned ranges leaves the
-//! availability answer alone.
+//! **Occurrence-hull half.** A cap buckets an existing event by the date its own
+//! start reads in the zone in force at that instant, not by the zone in force
+//! during the search window. Two instants the participant reads in different
+//! zones can therefore share one bucket: a booking during a leg and an existing
+//! event after the participant is home again, later in the same day, week or
+//! month. These probes build that shape from the outside in — a leg over the
+//! window, a candidate inside it and a counted event outside it whose own-zone
+//! label matches — and check the two things the range answer promises: the
+//! returned occurrence hull contains the counted event, and removing data outside
+//! the returned ranges leaves the availability answer alone.
 //!
-//! The generator cannot be relied on for this shape: it places events at small
-//! offsets around the window and cannot arrange the shared label across two
-//! zones, which is why this is a probe rather than one more property over
-//! generated cases.
+//! **Key-closure half.** A cap merges every record sharing an event key across all
+//! supplied time ranges, so the initial hulls are not key-complete. A record just
+//! outside a hull can extend an event into the candidate's bucket, or move its
+//! start out of it, and it may be a block, an occurrence or an all-day record the
+//! hull did not select. These fixtures build each shape from the outside in, prove
+//! the one-pass fetch diverges, and require the documented two-phase fetch —
+//! initial hulls plus one round of event-key closure — to match the full answer.
+//!
+//! The generator cannot be relied on for either shape: it places events at small
+//! offsets around the window and cannot arrange a shared label across two zones or
+//! a record carrying an observed key outside the hull, which is why these are
+//! probes rather than properties over generated cases.
 
 use std::sync::OnceLock;
 
 use opportune::Engine;
 use opportune::model::{
-    Block, Cap, CapMeasure, CapPer, CapPeriod, Explain, Goal, Occurrence, Participant, RangesQuery,
-    Request, Requirement, Rule, RuleKind, Span, Term, ZonePeriod,
+    Block, Cap, CapMeasure, CapPer, CapPeriod, Explain, Goal, Occurrence, OfferFlag, Participant,
+    Proposal, RangesQuery, Request, RequiredRanges, Requirement, ReserveSpan, Response, Rule,
+    RuleKind, Span, Term, ZonePeriod,
 };
-use opportune::reasons::{ReasonCode, ReasonParams};
+use opportune::reasons::{Reason, ReasonCode, ReasonParams};
 use opportune::tags::{Selector, Tag};
 use opportune::time::{
     Date, Duration, Instant, LocalResolution, RuleZone, TimeOfDay, TimeZoneDatabase, Weekday, Zone,
     ZoneName, ZoneSchedule,
 };
+use opportune_testkit::fetch::{key_closed_request, one_pass_request};
 use opportune_testkit::generators::ZONE_MATRIX;
 use proptest::prelude::*;
 
@@ -156,25 +166,10 @@ fn labels(
     )
 }
 
-/// Remove every block and occurrence that overlaps neither returned envelope.
-fn stripped(request: &Request, ranges: &opportune::model::RequiredRanges) -> Request {
-    let mut stripped = request.clone();
-    let occurrences = ranges.occurrences.expect("a cap applies");
-    let overlaps = |from: Instant, until: Instant| {
-        let calendar = ranges.calendar;
-        let in_calendar = from < calendar.end() && calendar.start() < until;
-        let in_occurrences = from < occurrences.end() && occurrences.start() < until;
-        in_calendar || in_occurrences
-    };
-    for participant in &mut stripped.participants {
-        if let Some(blocks) = &mut participant.calendar {
-            blocks.retain(|block| overlaps(block.span.start(), block.span.end()));
-        }
-    }
-    stripped
-        .occurrences
-        .retain(|occurrence| overlaps(occurrence.span.start(), occurrence.span.end()));
-    stripped
+/// The request after the documented two-phase fetch: the initial calendar and
+/// occurrence hulls plus one round of event-key closure.
+fn stripped(request: &Request, ranges: &RequiredRanges) -> Request {
+    key_closed_request(request, ranges)
 }
 
 proptest! {
@@ -762,4 +757,1077 @@ fn a_window_at_the_start_of_the_range_hulls_the_minutes_it_can_hold() {
              {label_min}..{label_after}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Key-closure half: cap inputs are key-complete, not one-pass (see the header).
+// ---------------------------------------------------------------------------
+
+/// The ranges the engine asks for `request`.
+fn required_ranges_of(request: &Request) -> RequiredRanges {
+    let mut query = RangesQuery::new(request.now, request.goal.clone());
+    query.rules.clone_from(&request.rules);
+    query.participants.clone_from(&request.participants);
+    engine()
+        .required_ranges(&query)
+        .expect("the fixture query resolves")
+}
+
+/// What `SlotCheck` reports, without the warning list: stripping a keyless block
+/// outside the hull can legitimately change a warning, but never the answer.
+type SlotAnswer = (bool, Vec<Reason>, Vec<OfferFlag>, Vec<ReserveSpan>);
+
+fn slot_answer(request: &Request, start: Instant, hosts: &[&str]) -> SlotAnswer {
+    let assignment = vec![hosts.iter().map(|host| (*host).to_owned()).collect()];
+    let check = engine()
+        .check_slot(request, &Proposal::single("main", start, assignment))
+        .expect("the fixture request and proposal are valid");
+    (check.valid, check.reasons, check.flags, check.reserve)
+}
+
+/// The full request, the documented one-pass fetch, and the documented key-closed
+/// fetch, each answered and each checked at `start`.
+struct FetchOutcome {
+    full: Response,
+    one_pass: Response,
+    closed: Response,
+    full_slot: SlotAnswer,
+    one_pass_slot: SlotAnswer,
+    closed_slot: SlotAnswer,
+    ranges: RequiredRanges,
+    one_pass_request: Request,
+    closed_request: Request,
+}
+
+fn fetch_outcome(request: &Request, start: Instant, hosts: &[&str]) -> FetchOutcome {
+    let ranges = required_ranges_of(request);
+    let full = engine()
+        .find_availability(request)
+        .expect("the full fixture request is valid");
+    let one_pass_request = one_pass_request(request, &ranges);
+    let closed_request = key_closed_request(request, &ranges);
+    let one_pass = engine()
+        .find_availability(&one_pass_request)
+        .expect("the one-pass fixture request is valid");
+    let closed = engine()
+        .find_availability(&closed_request)
+        .expect("the key-closed fixture request is valid");
+    let full_slot = slot_answer(request, start, hosts);
+    let one_pass_slot = slot_answer(&one_pass_request, start, hosts);
+    let closed_slot = slot_answer(&closed_request, start, hosts);
+    FetchOutcome {
+        full,
+        one_pass,
+        closed,
+        full_slot,
+        one_pass_slot,
+        closed_slot,
+        ranges,
+        one_pass_request,
+        closed_request,
+    }
+}
+
+/// The key-closed fetch must answer exactly as the full request did.
+fn assert_closed_matches_full(outcome: &FetchOutcome) {
+    assert_eq!(outcome.closed.offers, outcome.full.offers, "offers differ");
+    assert_eq!(
+        outcome.closed.dates, outcome.full.dates,
+        "date counts differ"
+    );
+    assert_eq!(
+        outcome.closed.excluded, outcome.full.excluded,
+        "exclusions differ"
+    );
+    assert_eq!(
+        outcome.closed_slot, outcome.full_slot,
+        "SlotCheck (valid, reasons, flags, reserve) differs"
+    );
+}
+
+fn interview_cap(measure: CapMeasure, limit: u32, period: CapPeriod) -> Rule {
+    Rule::new(
+        "cap",
+        RuleKind::Cap(Cap::new(
+            Selector::Tag(tag("interview")),
+            measure,
+            limit,
+            period,
+            CapPer::Each,
+            RuleZone::Participant,
+            Weekday::Monday,
+        )),
+    )
+}
+
+fn fixture_goal(zone: &str, window: Span, candidate: Instant, host: &str, duration: u32) -> Goal {
+    let mut goal = Goal::single(
+        ZoneName::new(zone).expect("a fixture zone name"),
+        window,
+        Duration::from_minutes(duration),
+        Requirement::new(vec![Term::person(host)]),
+    );
+    goal.candidates = Some(vec![candidate]);
+    goal.parts[0].tags = vec![tag("interview")];
+    goal
+}
+
+/// A block over a fixture span, carrying `key` and the `interview` tag.
+fn keyed_block(span: Span, key: &str, tagged: bool) -> Block {
+    let mut block = Block::new(span);
+    block.event_key = Some(key.to_owned());
+    if tagged {
+        block.tags = vec![tag("interview")];
+    }
+    block
+}
+
+/// A later block sharing a counted event's key extends the event beyond the
+/// occurrence hull. Full data charges those minutes to the candidate's bucket and
+/// rejects the start; a one-pass fetch never sees them and offers it.
+#[test]
+fn a_later_out_of_hull_block_extends_a_minutes_capped_event() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    // Four days on: past the occurrence hull's day and past the calendar hull's
+    // one-day padding either side of the window.
+    let later_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 12, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![
+        keyed_block(
+            Span::new(utc(day, 10, 0), utc(day, 10, 15)).expect("a span"),
+            "evt_late",
+            true,
+        ),
+        // Outside both the occurrence day hull and the calendar padding, so a
+        // one-pass fetch drops it.
+        keyed_block(
+            Span::new(utc(later_day, 1, 0), utc(later_day, 1, 30)).expect("a span"),
+            "evt_late",
+            true,
+        ),
+    ]);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Minutes, 60, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert_closed_matches_full(&outcome);
+    assert!(
+        outcome.full.offers.is_empty(),
+        "the merged event's minutes fill the bucket: {:?}",
+        outcome.full.offers
+    );
+    assert!(!outcome.full_slot.0, "the full request rejects the start");
+    assert_eq!(
+        outcome.one_pass.offers.len(),
+        1,
+        "a one-pass fetch sees only the in-hull copy and offers the start"
+    );
+    assert!(
+        outcome.one_pass_slot.0,
+        "the one-pass request accepts the start"
+    );
+}
+
+/// A block earlier than the occurrence hull shares a counted event's key and
+/// moves the event's start into an earlier bucket. Full data offers the start;
+/// a one-pass fetch sees only the in-hull copy in the candidate's bucket,
+/// reaches the cap, and rejects it.
+#[test]
+fn an_earlier_out_of_hull_block_moves_a_count_capped_event_to_an_earlier_bucket() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    // The Saturday before the Monday that starts the candidate's week.
+    let earlier = Date::new(2027, 6, 12).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![
+        keyed_block(
+            Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+            "evt_early",
+            true,
+        ),
+        keyed_block(
+            Span::new(utc(earlier, 10, 0), utc(earlier, 10, 30)).expect("a span"),
+            "evt_early",
+            true,
+        ),
+    ]);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Week));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert_closed_matches_full(&outcome);
+    assert_eq!(
+        outcome.full.offers.len(),
+        1,
+        "the merged event starts in the previous week, leaving this bucket free"
+    );
+    assert!(outcome.full_slot.0, "the full request accepts the start");
+    assert!(
+        outcome.one_pass.offers.is_empty(),
+        "a one-pass fetch sees the in-hull copy in this week's bucket and rejects"
+    );
+    assert!(
+        !outcome.one_pass_slot.0,
+        "the one-pass request rejects the start"
+    );
+}
+
+/// An occurrence fixes an event's span and participants, but a same-key all-day
+/// block on another participant still contributes its tags. The block lies far
+/// outside the hull, so a one-pass fetch loses the counted tag and offers the
+/// start that full data rejects.
+#[test]
+fn an_all_day_copy_on_another_participant_supplies_the_counted_tag() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+    // Past both the day hull and the calendar hull's one-day padding.
+    let far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let far_next = Date::new(2027, 6, 21).expect("a fixture date");
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(Vec::new());
+    let mut bo = Participant::attendee("bo", ZoneName::new("UTC").expect("a zone name"));
+    let mut all_day = keyed_block(
+        Span::new(utc(far_day, 0, 0), utc(far_next, 0, 0)).expect("a span"),
+        "evt_tag",
+        true,
+    );
+    all_day.all_day = true;
+    bo.calendar = Some(vec![all_day]);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.participants.push(bo);
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_tag",
+            Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+            vec!["ana".to_owned()],
+        )
+        .expect("the occurrence names a participant"),
+    );
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert_closed_matches_full(&outcome);
+    assert!(
+        outcome.full.offers.is_empty(),
+        "the all-day copy's tag brings the occurrence into the cap"
+    );
+    assert!(!outcome.full_slot.0, "the full request rejects the start");
+    assert_eq!(
+        outcome.one_pass.offers.len(),
+        1,
+        "a one-pass fetch drops the all-day copy and loses the counted tag"
+    );
+    assert!(
+        outcome.one_pass_slot.0,
+        "the one-pass request accepts the start"
+    );
+}
+
+/// Event-key closure scans every request participant, not just the ones a cap
+/// covers: the in-hull copy of an event sits on an attendee, and the out-of-hull
+/// copy that makes it count sits on the cap-covered host. Full data merges them
+/// and rejects the start; a one-pass fetch keeps only the attendee's copy, which
+/// the cap never counts, and offers it.
+#[test]
+fn closure_scans_a_participant_no_cap_covers() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    // Past both the day hull and the calendar hull's one-day padding.
+    let far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 9, 30)).expect("a window");
+    let candidate = utc(day, 9, 0);
+
+    // The cap covers hosts, so it covers ana and never bo.
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![keyed_block(
+        Span::new(utc(far_day, 12, 0), utc(far_day, 12, 30)).expect("a span"),
+        "evt_cross",
+        true,
+    )]);
+    let mut bo = Participant::attendee("bo", ZoneName::new("UTC").expect("a zone name"));
+    bo.calendar = Some(vec![keyed_block(
+        Span::new(utc(day, 12, 0), utc(day, 12, 30)).expect("a span"),
+        "evt_cross",
+        true,
+    )]);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.participants.push(bo);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert_closed_matches_full(&outcome);
+    assert!(
+        outcome.full.offers.is_empty(),
+        "the merged event names the cap-covered host"
+    );
+    assert!(!outcome.full_slot.0, "the full request rejects the start");
+    assert_eq!(
+        outcome.one_pass.offers.len(),
+        1,
+        "a one-pass fetch drops the host's copy and no longer counts the event"
+    );
+    assert!(
+        outcome.one_pass_slot.0,
+        "the one-pass request accepts the start"
+    );
+}
+
+/// A keyless block outside the hull is unrelated data: closure must not keep it,
+/// and the fetch stays at the occurrence hull rather than widening to the full
+/// supported range.
+#[test]
+fn a_keyless_out_of_hull_block_stays_stripped_and_the_hull_stays_narrow() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let next = Date::new(2027, 6, 17).expect("a fixture date");
+    let far = Date::new(2027, 12, 1).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    let mut keyless = Block::new(Span::new(utc(far, 10, 0), utc(far, 10, 30)).expect("a span"));
+    keyless.tags = vec![tag("interview")];
+    ana.calendar = Some(vec![keyless]);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert_closed_matches_full(&outcome);
+    let hull = outcome.ranges.occurrences.expect("the cap applies");
+    assert_eq!(
+        (hull.start(), hull.end()),
+        (utc(day, 0, 0), utc(next, 0, 0)),
+        "the fetch is the day bucket, not the full supported range"
+    );
+    assert_eq!(
+        outcome.one_pass_request, outcome.closed_request,
+        "closure must not retain a keyless record outside the hull"
+    );
+    assert!(
+        outcome.closed_request.participants[0]
+            .calendar
+            .as_ref()
+            .is_some_and(Vec::is_empty),
+        "the keyless far block is stripped, leaving a known-empty calendar"
+    );
+    assert_eq!(outcome.full.offers.len(), 1, "the candidate is offered");
+}
+
+// The bounded shared-key property: an in-hull record and an out-of-hull record
+// carry one event key, and a tag on the out-of-hull record is what makes the
+// event count. Closure must retrieve the out-of-hull record, leave an unrelated
+// out-of-hull key stripped, and answer exactly as the full request did across
+// cap shapes, representations, all-day records and exclusions.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(96))]
+
+    #[test]
+    fn key_closure_retrieves_out_of_hull_records_and_matches_full_data(
+        period in prop_oneof![
+            Just(CapPeriod::Day),
+            Just(CapPeriod::Week),
+            Just(CapPeriod::Month),
+        ],
+        measure in prop_oneof![Just(CapMeasure::Count), Just(CapMeasure::Minutes)],
+        pooled in any::<bool>(),
+        in_hull_is_occurrence in any::<bool>(),
+        all_day in any::<bool>(),
+        excluded in any::<bool>(),
+        zone in prop_oneof![
+            Just("UTC"),
+            Just("Europe/London"),
+            Just("Asia/Tokyo"),
+        ],
+    ) {
+        let day = Date::new(2027, 6, 16).expect("a fixture date");
+        let window_start = utc(day, 9, 0);
+        let window_end = Instant::from_minutes(window_start.minutes() + 6 * 60)
+            .expect("a supported instant");
+        let candidate = window_start;
+        let in_hull_start = Instant::from_minutes(window_start.minutes() + 2 * 60)
+            .expect("a supported instant");
+        let in_hull_end = Instant::from_minutes(in_hull_start.minutes() + 60)
+            .expect("a supported instant");
+        // Far outside any day, week or month bucket the window can touch.
+        let far_start = Instant::from_minutes(window_start.minutes() + 400 * 1_440)
+            .expect("a supported instant");
+        let far_end = Instant::from_minutes(far_start.minutes() + 60)
+            .expect("a supported instant");
+        let unrelated_start = Instant::from_minutes(far_start.minutes() + 120)
+            .expect("a supported instant");
+        let unrelated_end = Instant::from_minutes(unrelated_start.minutes() + 60)
+            .expect("a supported instant");
+
+        let window = Span::new(window_start, window_end).expect("a window");
+        let in_hull = Span::new(in_hull_start, in_hull_end).expect("a span");
+        let far = Span::new(far_start, far_end).expect("a span");
+
+        let mut ana = Participant::new("ana", ZoneName::new(zone).expect("a zone name"));
+        ana.calendar = Some(vec![keyed_block(
+            Span::new(unrelated_start, unrelated_end).expect("a span"),
+            "evt_unrelated",
+            true,
+        )]);
+        let mut bo = Participant::attendee("bo", ZoneName::new(zone).expect("a zone name"));
+        let mut far_copy = keyed_block(far, "evt_shared", true);
+        far_copy.all_day = all_day;
+        bo.calendar = Some(vec![far_copy]);
+        if !in_hull_is_occurrence {
+            ana.calendar.as_mut().expect("a calendar").push(keyed_block(
+                in_hull,
+                "evt_shared",
+                false,
+            ));
+        }
+
+        let mut request = Request::new(
+            window_start,
+            fixture_goal(zone, window, candidate, "ana", 30),
+        );
+        request.participants.push(ana);
+        request.participants.push(bo);
+        if in_hull_is_occurrence {
+            request.occurrences.push(
+                Occurrence::new("evt_shared", in_hull, vec!["ana".to_owned()])
+                    .expect("the occurrence names a participant"),
+            );
+        }
+        let (per, cap_zone) = if pooled {
+            (CapPer::Pooled, RuleZone::Event)
+        } else {
+            (CapPer::Each, RuleZone::Participant)
+        };
+        let limit = match measure {
+            CapMeasure::Count => 1,
+            // The in-hull event holds 60 minutes; the booking adds 30.
+            CapMeasure::Minutes => 60,
+        };
+        request.rules.push(Rule::new(
+            "cap",
+            RuleKind::Cap(Cap::new(
+                Selector::Tag(tag("interview")),
+                measure,
+                limit,
+                period,
+                per,
+                cap_zone,
+                Weekday::Monday,
+            )),
+        ));
+        if excluded {
+            request.exclude_event_keys.push("evt_shared".to_owned());
+        }
+
+        let outcome = fetch_outcome(&request, candidate, &["ana"]);
+        assert_closed_matches_full(&outcome);
+
+        let hull = outcome.ranges.occurrences.expect("the cap applies");
+        let far_retrieved = outcome
+            .closed_request
+            .participants
+            .iter()
+            .flat_map(Participant::blocks)
+            .any(|block| {
+                block.event_key.as_deref() == Some("evt_shared")
+                    && block.span.start() >= hull.end()
+            });
+        prop_assert!(
+            far_retrieved,
+            "closure must retrieve the out-of-hull shared-key record ({:?}..{:?})",
+            hull.start(),
+            hull.end()
+        );
+        let unrelated_present = outcome
+            .closed_request
+            .participants
+            .iter()
+            .flat_map(Participant::blocks)
+            .any(|block| block.event_key.as_deref() == Some("evt_unrelated"));
+        prop_assert!(
+            !unrelated_present,
+            "an out-of-hull record with an unobserved key must stay stripped"
+        );
+    }
+}
+
+/// Without a cap no occurrence data is fetched, and a participant with no
+/// calendar stays unknown rather than becoming a known-empty calendar.
+#[test]
+fn the_fetch_model_preserves_unknown_calendars_and_clears_occurrences_without_a_cap() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    // No calendar at all: unknown, never known-empty.
+    request.participants.push(Participant::new(
+        "ana",
+        ZoneName::new("UTC").expect("a zone name"),
+    ));
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_nocap",
+            Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+            vec!["ana".to_owned()],
+        )
+        .expect("the occurrence names a participant"),
+    );
+
+    let ranges = required_ranges_of(&request);
+    assert!(
+        ranges.occurrences.is_none(),
+        "no cap applies, so no occurrence range is returned"
+    );
+    let closed = key_closed_request(&request, &ranges);
+    assert!(
+        closed.participants[0].calendar.is_none(),
+        "an unknown calendar must stay unknown"
+    );
+    assert!(
+        closed.occurrences.is_empty(),
+        "occurrences are cleared when there is no cap"
+    );
+}
+
+/// With no cap there is no occurrence hull and therefore no key observation or
+/// closure: a same-key copy outside the calendar hull stays stripped even though
+/// its in-hull relative would have seeded closure had a cap applied.
+#[test]
+fn no_cap_does_not_close_over_a_calendar_blocks_key() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+    let in_hull = keyed_block(
+        Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+        "evt_uncapped",
+        true,
+    );
+    let far = keyed_block(
+        Span::new(utc(far_day, 10, 0), utc(far_day, 10, 30)).expect("a span"),
+        "evt_uncapped",
+        true,
+    );
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![in_hull.clone(), far]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.occurrences.push(
+        Occurrence::new("evt_uncapped", in_hull.span, vec!["ana".to_owned()])
+            .expect("the occurrence names a participant"),
+    );
+
+    let ranges = required_ranges_of(&request);
+    assert!(ranges.occurrences.is_none());
+    let closed = key_closed_request(&request, &ranges);
+    assert!(closed.occurrences.is_empty());
+    assert_eq!(
+        closed.participants[0].blocks(),
+        &[in_hull],
+        "without a cap, the far same-key block is not an observed-key fetch"
+    );
+}
+
+/// The cap/closure path must preserve an unknown calendar too: turning it into a
+/// known-empty calendar would remove the offer's `calendar_unknown` flag.
+#[test]
+fn cap_closure_preserves_an_unknown_calendar() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(Participant::new(
+        "ana",
+        ZoneName::new("UTC").expect("a zone name"),
+    ));
+    // Make closure non-vacuous on another participant: preserving `None` only
+    // when there are no observed keys would not prove the contract.
+    let far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let mut bo = Participant::attendee("bo", ZoneName::new("UTC").expect("a zone name"));
+    bo.calendar = Some(vec![
+        keyed_block(
+            Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+            "evt_seed",
+            true,
+        ),
+        keyed_block(
+            Span::new(utc(far_day, 10, 0), utc(far_day, 10, 30)).expect("a span"),
+            "evt_seed",
+            true,
+        ),
+    ]);
+    request.participants.push(bo);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert!(outcome.ranges.occurrences.is_some());
+    assert_closed_matches_full(&outcome);
+    assert!(
+        outcome.closed_request.participants[0].calendar.is_none(),
+        "closure must not turn an unknown calendar into a known-empty one"
+    );
+    assert!(
+        outcome.closed_request.participants[1]
+            .blocks()
+            .iter()
+            .any(|block| block.span.start() == utc(far_day, 10, 0)),
+        "the other participant's far copy proves closure actually ran"
+    );
+    assert!(
+        outcome.closed.offers[0].calendar_unknown(),
+        "the closed request retains the unknown-calendar offer flag"
+    );
+}
+
+/// Occurrences stay only when their own span overlaps the occurrence hull or they
+/// carry a key the occurrence-range fetch observed; overlapping the wider calendar
+/// hull is not enough.
+#[test]
+fn the_fetch_model_keeps_occurrences_only_for_the_occurrence_hull_or_an_observed_key() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let calendar_only = Date::new(2027, 6, 17).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    // Inside the calendar hull's one-day padding, outside the day occurrence
+    // hull: a copy sharing the observed key, which closure must retrieve.
+    ana.calendar = Some(vec![keyed_block(
+        Span::new(utc(calendar_only, 10, 0), utc(calendar_only, 10, 30)).expect("a span"),
+        "evt_in",
+        true,
+    )]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_in",
+            Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+            vec!["ana".to_owned()],
+        )
+        .expect("the occurrence names a participant"),
+    );
+    // Overlaps the calendar hull only, and carries a key nobody observed.
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_out",
+            Span::new(utc(calendar_only, 12, 0), utc(calendar_only, 12, 30)).expect("a span"),
+            vec!["ana".to_owned()],
+        )
+        .expect("the occurrence names a participant"),
+    );
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let ranges = required_ranges_of(&request);
+    let one_pass = one_pass_request(&request, &ranges);
+    let closed = key_closed_request(&request, &ranges);
+
+    let keys = |request: &Request| -> Vec<String> {
+        request
+            .occurrences
+            .iter()
+            .map(|occurrence| occurrence.event_key.clone())
+            .collect()
+    };
+    assert_eq!(
+        keys(&one_pass),
+        ["evt_in"],
+        "an occurrence overlapping only the calendar hull is never fetched"
+    );
+    assert_eq!(
+        keys(&closed),
+        ["evt_in"],
+        "closure does not resurrect an occurrence with an unobserved key"
+    );
+    assert!(
+        closed.participants[0]
+            .blocks()
+            .iter()
+            .any(|block| block.event_key.as_deref() == Some("evt_in")),
+        "closure retrieves the block carrying the observed key"
+    );
+}
+
+/// A block retained only because it overlaps the calendar hull is not an
+/// occurrence-range observation. Its key must not pull otherwise irrelevant
+/// copies into the closed request.
+#[test]
+fn a_calendar_only_block_does_not_seed_closure() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let calendar_only_day = Date::new(2027, 6, 17).expect("a fixture date");
+    let far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![
+        keyed_block(
+            Span::new(
+                utc(calendar_only_day, 10, 0),
+                utc(calendar_only_day, 10, 30),
+            )
+            .expect("a span"),
+            "evt_calendar_only",
+            true,
+        ),
+        keyed_block(
+            Span::new(utc(far_day, 10, 0), utc(far_day, 10, 30)).expect("a span"),
+            "evt_calendar_only",
+            true,
+        ),
+    ]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let ranges = required_ranges_of(&request);
+    let one_pass = one_pass_request(&request, &ranges);
+    let closed = key_closed_request(&request, &ranges);
+    assert_eq!(
+        one_pass.participants[0].blocks().len(),
+        1,
+        "the fixture's first copy overlaps only the calendar hull"
+    );
+    assert_eq!(
+        closed, one_pass,
+        "a calendar-only observation must not retrieve the far copy sharing its key"
+    );
+}
+
+/// Travel makes a block relevant to the calendar hull only when that occupied
+/// span overlaps it. It must not make the block an occurrence-range observation:
+/// the occurrence hull always reads the block's own span.
+#[test]
+fn travel_overlap_with_the_occurrence_hull_does_not_seed_closure() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let before_month = Date::new(2027, 5, 31).expect("a fixture date");
+    let after_month = Date::new(2027, 7, 20).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut travel_copy = keyed_block(
+        Span::new(utc(before_month, 23, 0), utc(before_month, 23, 30)).expect("a span"),
+        "evt_travel_only",
+        true,
+    );
+    travel_copy.travel_after = Duration::from_minutes(60);
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![
+        travel_copy,
+        keyed_block(
+            Span::new(utc(after_month, 10, 0), utc(after_month, 10, 30)).expect("a span"),
+            "evt_travel_only",
+            true,
+        ),
+    ]);
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Month));
+
+    let ranges = required_ranges_of(&request);
+    let occurrences = ranges.occurrences.expect("the month cap applies");
+    let travel = &request.participants[0].blocks()[0];
+    let occupied_end = travel.span.end().minutes() + travel.travel_after.minutes();
+    assert!(travel.span.end() <= occurrences.start());
+    assert!(occupied_end > occurrences.start().minutes());
+    assert!(
+        occupied_end <= ranges.calendar.start().minutes(),
+        "the fixture's occupied span reaches only the occurrence hull"
+    );
+
+    let one_pass = one_pass_request(&request, &ranges);
+    let closed = key_closed_request(&request, &ranges);
+    assert!(
+        one_pass.participants[0].blocks().is_empty(),
+        "travel overlap with the occurrence hull is not an initial-fetch match"
+    );
+    assert_eq!(
+        closed, one_pass,
+        "a dropped travel copy must not seed retrieval of its far same-key copy"
+    );
+}
+
+/// Closure is a record filter, not an event-key projection: every same-key
+/// record survives exactly once, in its original position.
+#[test]
+fn closure_preserves_same_key_record_identity_and_request_order() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let first_far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let second_far_day = Date::new(2027, 6, 21).expect("a fixture date");
+    let unobserved_day = Date::new(2027, 12, 1).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    // Deliberately not chronological: a key-indexed rebuild or a sort would
+    // change provider record order even though it preserved the event's hull.
+    // The last far copy is untagged, so selector-based retention fails here too.
+    let expected = vec![
+        keyed_block(
+            Span::new(utc(first_far_day, 12, 0), utc(first_far_day, 12, 30)).expect("a span"),
+            "evt_shared",
+            true,
+        ),
+        keyed_block(
+            Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+            "evt_shared",
+            false,
+        ),
+        keyed_block(
+            Span::new(utc(second_far_day, 11, 0), utc(second_far_day, 11, 45)).expect("a span"),
+            "evt_shared",
+            false,
+        ),
+    ];
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(expected.clone());
+    ana.calendar.as_mut().expect("a calendar").push(keyed_block(
+        Span::new(utc(unobserved_day, 10, 0), utc(unobserved_day, 10, 30)).expect("a span"),
+        "evt_unobserved",
+        true,
+    ));
+
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let ranges = required_ranges_of(&request);
+    let one_pass = one_pass_request(&request, &ranges);
+    let closed = key_closed_request(&request, &ranges);
+    assert_eq!(
+        one_pass.participants[0].blocks(),
+        &expected[1..2],
+        "only the occurrence-hull copy survives the initial fetch"
+    );
+    assert_eq!(
+        closed.participants[0].blocks(),
+        expected,
+        "closure must retain every same-key record in request order, without key deduplication"
+    );
+}
+
+/// Occurrences are request-global and may name only people outside the request.
+/// Once a participant's in-hull block observes their key, closure must retain the
+/// occurrence: its authoritative participant list still suppresses the block's
+/// participant, even though none of the occurrence's own names are request IDs.
+#[test]
+fn closure_retains_an_occurrence_naming_only_participants_outside_the_request() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![keyed_block(
+        Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+        "evt_external",
+        true,
+    )]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_external",
+            Span::new(utc(day, 10, 0), utc(day, 11, 0)).expect("a span"),
+            vec!["external".to_owned()],
+        )
+        .expect("an occurrence may name someone outside the request"),
+    );
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    assert_closed_matches_full(&outcome);
+    assert_eq!(
+        outcome.closed_request.occurrences, request.occurrences,
+        "closure must not participant-filter the authoritative occurrence away"
+    );
+    assert_eq!(
+        outcome.full.offers.len(),
+        1,
+        "the occurrence names no request participant, so the event counts for nobody"
+    );
+
+    // The reachable failure a participant-scoped occurrence closure produces:
+    // without the occurrence, its same-key block becomes a standalone event on
+    // ana and silently fills her cap instead.
+    let mut participant_filtered = outcome.closed_request.clone();
+    participant_filtered.occurrences.clear();
+    let filtered = engine()
+        .find_availability(&participant_filtered)
+        .expect("the filtered control request is valid");
+    assert!(
+        filtered.offers.is_empty(),
+        "dropping the authoritative occurrence falsely charges the block to ana"
+    );
+    assert!(
+        !slot_answer(&participant_filtered, candidate, &["ana"]).0,
+        "the same false exclusion reaches confirmation"
+    );
+}
+
+/// An occurrence is a request-global record, so the **initial** fetch must not
+/// participant-filter it either. This one names only somebody outside the
+/// request, and its same-key block lies inside the calendar hull but outside the
+/// occurrence hull: the initial fetch retrieves the block, the block seeds no
+/// closure key, and a participant-filtered occurrence query therefore loses the
+/// occurrence with nothing to recover it. Full data charges the event to nobody;
+/// the filtered fetch charges the block to `ana` on its own day and rejects a
+/// booking there.
+#[test]
+fn an_occurrence_naming_only_outsiders_is_needed_by_the_initial_fetch_too() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let next = Date::new(2027, 6, 17).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+    // A booking on the day the stripped block sits on: the bucket a
+    // participant-filtered fetch wrongly fills.
+    let next_day_start = utc(next, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![keyed_block(
+        Span::new(utc(next, 10, 0), utc(next, 10, 30)).expect("a span"),
+        "evt_outsider",
+        true,
+    )]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_outsider",
+            Span::new(utc(day, 10, 0), utc(day, 11, 0)).expect("a span"),
+            vec!["external".to_owned()],
+        )
+        .expect("an occurrence may name someone outside the request")
+        .with_tags(vec![tag("interview")]),
+    );
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    let hull = outcome.ranges.occurrences.expect("the cap applies");
+    let block = &request.participants[0].blocks()[0];
+    assert!(
+        block.span.start() >= hull.end() || hull.start() >= block.span.end(),
+        "the block lies outside the occurrence hull, so it seeds no closure key"
+    );
+    assert!(
+        block.span.start() < outcome.ranges.calendar.end()
+            && outcome.ranges.calendar.start() < block.span.end(),
+        "the block lies inside the calendar hull, so the initial fetch retrieves it"
+    );
+
+    assert_closed_matches_full(&outcome);
+    assert_eq!(
+        outcome.closed_request.occurrences, request.occurrences,
+        "the initial fetch keeps an occurrence no request participant is named on"
+    );
+    assert!(
+        slot_answer(&request, next_day_start, &["ana"]).0,
+        "full data charges the event to nobody, so the block's own day is free"
+    );
+    assert!(
+        slot_answer(&outcome.closed_request, next_day_start, &["ana"]).0,
+        "the closed fetch agrees on that day too"
+    );
+
+    // What a participant-filtered occurrence query leaves behind: the same closed
+    // request with the occurrence gone. No key was observed on an
+    // occurrence-range record, so the closure retrieves nothing and the block
+    // stands alone as `ana`'s event.
+    let mut filtered = outcome.closed_request.clone();
+    filtered.occurrences.clear();
+    let answer = slot_answer(&filtered, next_day_start, &["ana"]);
+    assert!(
+        !answer.0,
+        "dropping the authoritative occurrence falsely charges the block to ana"
+    );
+    assert!(
+        answer
+            .1
+            .iter()
+            .any(|reason| reason.code == ReasonCode::CapReached),
+        "and reports it as the cap: {:?}",
+        answer.1
+    );
 }

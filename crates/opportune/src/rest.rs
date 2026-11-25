@@ -293,27 +293,64 @@ fn self_conflict_spans(
         });
     }
     let mut blocked = Vec::new();
-    for (day, late_spans) in &late_by_date {
+    for (day, late_segments) in &late_by_date {
         let Ok(next) = day.plus_days(1) else {
             continue;
         };
-        let Some(early_spans) = early_by_date.get(&next) else {
+        let Some(early_segments) = early_by_date.get(&next) else {
             continue;
         };
-        for &(l0, l1) in late_spans {
-            for &(e0, e1) in early_spans {
-                // `[s, s + occupied_len)` overlaps `[l0, l1)` iff
-                // `l0 - occupied_len + 1 <= s < l1`, and `[e0, e1)` iff
-                // `e0 - occupied_len + 1 <= s < e1`.
-                let from = l0.max(e0).saturating_sub(occupied_len).saturating_add(1);
-                let until = l1.min(e1);
-                if let Ok(span) = MinuteSpan::new(from, until) {
-                    blocked.push(span);
-                }
-            }
-        }
+        intersect_day_segments(late_segments, early_segments, occupied_len, &mut blocked);
     }
     blocked
+}
+
+/// Appends the occupied-start minutes whose booking overlaps both a segment of
+/// `late` and a segment of `early`, where the two slices are the raw segments one
+/// local date carries.
+///
+/// A booking of length `occupied_len` starting at `s` overlaps `[start, end)` iff
+/// `s` is in `[start - occupied_len + 1, end)`. So each side is widened once, the
+/// two widened sides are canonicalised with [`IntervalSet::from_spans`], and the
+/// canonical sets are intersected: over sets of minutes,
+/// `union(intersect(widen(l), widen(e)))` is `intersect(union(widen(l)),
+/// union(widen(e)))`, however many segments each date carries.
+///
+/// Widening comes before the canonicalisation, so the widened segments are what
+/// [`IntervalSet::from_spans`] merges: widening can make neighbouring segments
+/// overlap, and the merged set is the one a booking start has to fall in. The
+/// widening is the saturating `x.saturating_sub(occupied_len).saturating_add(1)`
+/// rather than `x.saturating_sub(occupied_len - 1)`, which differs from it at the
+/// bottom of the representable range.
+fn intersect_day_segments(
+    late: &[(i64, i64)],
+    early: &[(i64, i64)],
+    occupied_len: i64,
+    out: &mut Vec<MinuteSpan>,
+) {
+    let late = widened_segments(late, occupied_len);
+    let early = widened_segments(early, occupied_len);
+    out.extend_from_slice(late.intersection(&early).spans());
+}
+
+/// One date's raw segments with each start moved back by `occupied_len - 1`
+/// minutes in the saturating form, as the canonical set of minutes a booking of
+/// that length may start at to reach any of them.
+///
+/// A segment shorter than its own widening covers no start and is left out, which
+/// is what the pairwise form of the same arithmetic produced for it. Whenever
+/// `self_conflict_spans` reaches this helper (`occupied_len` above one), the
+/// widened start stays before the segment's own end, so nothing is dropped.
+fn widened_segments(segments: &[(i64, i64)], occupied_len: i64) -> IntervalSet {
+    IntervalSet::from_spans(
+        segments
+            .iter()
+            .filter_map(|&(start, end)| {
+                let widened = start.saturating_sub(occupied_len).saturating_add(1);
+                (widened < end).then(|| MinuteSpan::from_valid(widened, end))
+            })
+            .collect(),
+    )
 }
 
 /// The earliest applicable `rest` rule that excludes the booking occupying
@@ -460,4 +497,288 @@ fn span_instants(judged: MinuteSpan) -> (Instant, Instant) {
         Instant::from_minutes(judged.start()).unwrap_or(Instant::MIN),
         Instant::from_minutes(judged.end()).unwrap_or(Instant::MAX),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MinuteSpan, ZoneSchedule, intersect_day_segments, self_conflict_spans, widened_segments,
+    };
+    use crate::intervals::IntervalSet;
+    use crate::time::{Date, LocalResolution, TimeOfDay, Zone};
+
+    /// The pre-optimisation construction: every late segment against every early
+    /// segment, one product at a time.
+    ///
+    /// It reproduces the arithmetic this module used before widening each side
+    /// once, so a difference in either the overlaps or the boundary arithmetic
+    /// shows up as a disagreement here rather than as a silently different answer.
+    fn pairwise_reference(
+        late: &[(i64, i64)],
+        early: &[(i64, i64)],
+        occupied_len: i64,
+    ) -> Vec<MinuteSpan> {
+        let mut spans = Vec::new();
+        for &(l0, l1) in late {
+            for &(e0, e1) in early {
+                let from = l0.max(e0).saturating_sub(occupied_len).saturating_add(1);
+                let until = l1.min(e1);
+                if let Ok(span) = MinuteSpan::new(from, until) {
+                    spans.push(span);
+                }
+            }
+        }
+        spans
+    }
+
+    /// The UTC minute `hour:minute` of a June 2027 day falls on.
+    fn minute(day: i8, hour: u8, minute: u8) -> i64 {
+        let date = Date::new(2027, 6, day).expect("a June 2027 date");
+        let time = TimeOfDay::new(hour, minute).expect("a time of day");
+        match Zone::utc().resolve_local(date, time) {
+            Ok(LocalResolution::Unique(instant)) => instant.minutes(),
+            Ok(_) => panic!("UTC has no skipped or repeated local times"),
+            Err(err) => panic!("a fixture instant is inside the supported range: {err}"),
+        }
+    }
+
+    /// One day pair's raw segments: `late(D)` and `early(D + 1)`.
+    type DayPair<'a> = (&'a [(i64, i64)], &'a [(i64, i64)]);
+
+    /// The canonical minutes a construction covers.
+    fn covered(spans: &[MinuteSpan]) -> IntervalSet {
+        IntervalSet::from_spans(spans.to_vec())
+    }
+
+    #[test]
+    fn a_day_level_construction_covers_the_same_minutes_as_the_pairwise_product() {
+        let late = [(600, 660), (700, 780), (1_000, 1_020)];
+        let early = [(500, 640), (750, 800), (1_010, 1_500)];
+        for occupied_len in [2, 3, 7, 30, 61, 120, 400] {
+            let mut widened = Vec::new();
+            intersect_day_segments(&late, &early, occupied_len, &mut widened);
+            assert_eq!(
+                covered(&widened),
+                covered(&pairwise_reference(&late, &early, occupied_len)),
+                "occupied_len {occupied_len}"
+            );
+        }
+    }
+
+    /// Where a sweep of segment layouts starts: inside the range, at its bottom,
+    /// and close enough to its top that the widening saturates.
+    const SWEEP_BASES: [i64; 6] = [0, 500, 1_000, i64::MIN, i64::MIN + 40, i64::MAX - 300];
+
+    #[test]
+    fn every_day_level_pairing_in_the_sweep_agrees_with_the_pairwise_product() {
+        for base in SWEEP_BASES {
+            for count in 1..=3_usize {
+                for length in [1_i64, 2, 5, 30] {
+                    for gap in [0_i64, 1, 2, 7, 40] {
+                        for shift in [-45_i64, -30, -5, 0, 15, 60] {
+                            for occupied_len in [2_i64, 3, 7, 30, 90, 400] {
+                                let segments_at = |offset: i64| -> Vec<(i64, i64)> {
+                                    (0..count)
+                                        .filter_map(|index| {
+                                            let step = i64::try_from(index).ok()?;
+                                            let start = base
+                                                .saturating_add(offset)
+                                                .saturating_add(step * (length + gap));
+                                            let end = start.saturating_add(length);
+                                            (end > start).then_some((start, end))
+                                        })
+                                        .collect()
+                                };
+                                let late = segments_at(0);
+                                let early = segments_at(shift);
+                                if late.is_empty() || early.is_empty() {
+                                    continue;
+                                }
+                                let mut widened = Vec::new();
+                                intersect_day_segments(&late, &early, occupied_len, &mut widened);
+                                // Cost invariant, not an output contract: one span
+                                // per late and early segment, never their product.
+                                assert!(
+                                    widened.len() <= late.len() + early.len(),
+                                    "late {late:?}, early {early:?}, occupied_len \
+                                     {occupied_len}: {} spans exceed the per-segment bound",
+                                    widened.len()
+                                );
+                                assert_eq!(
+                                    covered(&widened),
+                                    covered(&pairwise_reference(&late, &early, occupied_len)),
+                                    "late {late:?}, early {early:?}, occupied_len {occupied_len}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn segments_that_only_overlap_once_widened_coalesce_before_the_intersection() {
+        // Three ten-minute segments two minutes apart, and an early segment over
+        // the middle of them. Widened by a long booking they touch and coalesce
+        // into one range; the minutes covered are the same either way.
+        let late = [(600, 610), (612, 622), (624, 634)];
+        let early = [(605, 630)];
+        assert_eq!(widened_segments(&late, 2).spans().len(), 3);
+        assert_eq!(
+            widened_segments(&late, 30).spans(),
+            [MinuteSpan::new(571, 634).unwrap()],
+            "a thirty-minute booking's widening joins all three segments"
+        );
+        for occupied_len in [2, 30] {
+            let mut blocks = Vec::new();
+            intersect_day_segments(&late, &early, occupied_len, &mut blocks);
+            assert_eq!(
+                covered(&blocks),
+                covered(&pairwise_reference(&late, &early, occupied_len)),
+                "occupied_len {occupied_len}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_booking_too_short_to_conflict_agrees_with_the_pairwise_product() {
+        // `self_conflict_spans` covers no start for a booking of one minute or
+        // less, so this is the arithmetic alone: the day-level form has to agree
+        // with the product at, below and above the widening it applies.
+        let late = [(600, 601), (610, 640), (700, 703)];
+        let early = [(602, 611), (612, 700), (701, 702)];
+        for occupied_len in [0, 1, -1, -30] {
+            let mut widened = Vec::new();
+            intersect_day_segments(&late, &early, occupied_len, &mut widened);
+            assert_eq!(
+                covered(&widened),
+                covered(&pairwise_reference(&late, &early, occupied_len)),
+                "occupied_len {occupied_len}"
+            );
+        }
+    }
+
+    #[test]
+    fn self_conflict_construction_is_empty_for_a_one_minute_or_shorter_booking() {
+        let late = IntervalSet::from_spans(vec![
+            MinuteSpan::new(minute(14, 23, 0), minute(15, 0, 0)).unwrap(),
+        ]);
+        let early = IntervalSet::from_spans(vec![
+            MinuteSpan::new(minute(15, 0, 0), minute(15, 1, 0)).unwrap(),
+        ]);
+        for occupied_len in [1, 0, -1, -30] {
+            assert!(
+                self_conflict_spans(
+                    &late,
+                    &early,
+                    &ZoneSchedule::fixed(Zone::utc()),
+                    &[],
+                    occupied_len,
+                )
+                .is_empty(),
+                "occupied_len {occupied_len} must bypass the day-level intersection"
+            );
+        }
+        assert_eq!(
+            self_conflict_spans(&late, &early, &ZoneSchedule::fixed(Zone::utc()), &[], 2),
+            [MinuteSpan::new(minute(14, 23, 59), minute(15, 0, 0)).unwrap()],
+            "two minutes reach both adjacent segments; one minute cannot"
+        );
+    }
+
+    #[test]
+    fn widening_saturates_at_the_bottom_of_the_representable_range() {
+        // `i64::MIN` itself cannot come out of schedule segmentation — a local
+        // date's segment starts inside the date — so the boundary is exercised
+        // through the helper the segmentation feeds.
+        let late = [(i64::MIN, i64::MIN + 10)];
+        let early = [(i64::MIN + 5, i64::MIN + 200)];
+        let mut widened = Vec::new();
+        intersect_day_segments(&late, &early, 30, &mut widened);
+        // `(i64::MIN + 5) - 30 + 1` saturates to the minute after the floor.
+        // `saturating_sub(occupied_len - 1)` would have kept `i64::MIN` itself,
+        // which no booking can start at.
+        assert_eq!(
+            widened,
+            [MinuteSpan::new(i64::MIN + 1, i64::MIN + 10).unwrap()]
+        );
+        assert_eq!(
+            covered(&widened),
+            covered(&pairwise_reference(&late, &early, 30))
+        );
+    }
+
+    #[test]
+    fn self_conflicts_are_found_across_local_dates_for_every_day_pair() {
+        // Two evenings and two mornings, each evening crossing local midnight, so
+        // `for_each_date_segment` cuts every evening into one segment per date and
+        // both day pairs contribute. A thirty-minute booking from 23:01 reaches
+        // the evening and the morning after it.
+        let late = IntervalSet::from_spans(vec![
+            MinuteSpan::new(minute(14, 22, 0), minute(15, 1, 0)).unwrap(),
+            MinuteSpan::new(minute(15, 22, 0), minute(16, 1, 0)).unwrap(),
+        ]);
+        let early = IntervalSet::from_spans(vec![
+            MinuteSpan::new(minute(15, 0, 30), minute(15, 2, 0)).unwrap(),
+            MinuteSpan::new(minute(16, 0, 30), minute(16, 2, 0)).unwrap(),
+        ]);
+        let occupied_len = 90;
+        let blocked = self_conflict_spans(
+            &late,
+            &early,
+            &ZoneSchedule::fixed(Zone::utc()),
+            &[],
+            occupied_len,
+        );
+
+        // The segments each date carries, in the order the date walk appends
+        // them: the evening of the date before a morning, cut at local midnight.
+        let day_pairs: [DayPair<'_>; 2] = [
+            (
+                &[(minute(14, 22, 0), minute(15, 0, 0))],
+                &[(minute(15, 0, 30), minute(15, 2, 0))],
+            ),
+            (
+                &[
+                    (minute(15, 0, 0), minute(15, 1, 0)),
+                    (minute(15, 22, 0), minute(16, 0, 0)),
+                ],
+                &[(minute(16, 0, 30), minute(16, 2, 0))],
+            ),
+        ];
+        let expected: Vec<MinuteSpan> = day_pairs
+            .iter()
+            .flat_map(|&(late, early)| pairwise_reference(late, early, occupied_len))
+            .collect();
+        // Cost invariant, not an output contract: production canonicalises this
+        // `Vec` before any reader sees it, so order and per-pair multiplicity are
+        // unobservable. For a date pair carrying `L` late and `E` early segments
+        // the pairwise product emits up to `L × E` spans while widening each side
+        // once and intersecting emits at most `L + E`; pin that bound so a return
+        // to the product fails here, without breaking on a behaviour-preserving
+        // reordering or merge.
+        let span_bound: usize = day_pairs
+            .iter()
+            .map(|&(late, early)| late.len() + early.len())
+            .sum();
+        assert!(
+            blocked.len() <= span_bound,
+            "at most one span per late and early segment on a date pair, \
+             got {} for a bound of {span_bound}",
+            blocked.len()
+        );
+        assert_eq!(covered(&blocked), covered(&expected));
+
+        // A booking that only reaches the morning of a date covers no start: the
+        // morning alone is one half of the pair, never both.
+        let morning_only = self_conflict_spans(
+            &IntervalSet::new(),
+            &early,
+            &ZoneSchedule::fixed(Zone::utc()),
+            &[],
+            occupied_len,
+        );
+        assert!(morning_only.is_empty());
+    }
 }

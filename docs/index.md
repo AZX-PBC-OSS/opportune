@@ -113,7 +113,7 @@ To work from a clone of the repository:
 
 ## Where to go next
 
-- [Recipes](recipes.md): nine worked scenarios — a personal booking link, interview panels with caps, rest and horizons, a conference booth, travel holds, provider adapters, a three-tier policy, a team plus a conference room, and a weighted panel rescheduled at capacity — in Rust, Python, and TypeScript — plus the production blueprints for booking commits, weighted dispatch, occurrences, and multi-tenant engines.
+- [Recipes](recipes.md): nine worked scenarios — a personal booking link, interview panels with caps, rest and horizons, a conference booth, travel holds, provider adapters, a three-tier policy, a team plus a conference room, and a weighted panel rescheduled at capacity — in Rust, Python, and TypeScript — plus integration notes on occurrences, weighting, fetch planning, and engine lifecycle.
 - [API reference](api.md): the Rust surface, JSON wire format and pointer errors, provider adapter contract, and Python/FastAPI guide.
 - [WASM and TypeScript](wasm.md): the npm package, generated types, Graph and Google adapter submodules, and bundle-size budget.
 - [Crate structure](crates.md): the six-crate Cargo workspace and crate boundaries.
