@@ -3043,6 +3043,10 @@ UPDATE participants SET id = id WHERE id = ANY($participant_ids);
 --    overlaps the occurrence hull. Do not prefilter by the cap's tags, status or
 --    all_day: a same-key copy on another participant can supply a counted tag.
 --    $request_participant_ids includes attendees and non-cap-covered participants.
+--    Occurrences are a request-global list, not a per-participant one: do not
+--    participant-filter them in either phase. One naming only people outside the
+--    request still overrides a same-key block's span and participants, and
+--    dropping it charges that block to its own participant separately.
 SELECT id, participant_id, event_key, span, status, all_day, tags,
        travel_before, travel_after
   FROM calendar_blocks
@@ -3051,8 +3055,7 @@ SELECT id, participant_id, event_key, span, status, all_day, tags,
                   upper(span) + travel_after, '[)') && $calendar_hull
         OR span && $occurrence_hull);
 SELECT id, event_key, span, participants, tags FROM occurrences
- WHERE participants && $request_participant_ids
-   AND span && $occurrence_hull;
+ WHERE span && $occurrence_hull;
 
 -- 3. Close over the event keys the occurrence-hull rows of that fetch observed,
 --    on every participant -- not only the ones a cap covers. One round settles
@@ -3062,9 +3065,8 @@ SELECT id, participant_id, event_key, span, status, all_day, tags,
   FROM calendar_blocks
  WHERE participant_id = ANY($request_participant_ids)
    AND event_key = ANY($observed_keys);
--- Occurrences are request-global: do not participant-filter this closure. One
--- naming only people outside the request still overrides a same-key block's
--- span and participants, and dropping it would charge that block separately.
+-- Request-global for the reason step 2 gives: an occurrence dropped here would
+-- let its same-key block be charged separately.
 SELECT id, event_key, span, participants, tags FROM occurrences
  WHERE event_key = ANY($observed_keys);
 
@@ -3128,7 +3130,8 @@ matching tag.
 `required_ranges` returns the initial `occurrences` hull beside the calendar hull,
 and that is phase one only. Fetch every block whose occupied span overlaps the
 calendar hull, plus every occurrence and block whose own span overlaps the
-occurrence hull, on every participant. Collect keys only from those
+occurrence hull, on every participant — occurrences request-globally, never
+filtered by the participants they name. Collect keys only from those
 occurrence-hull records, then fetch every record carrying one of those keys —
 all-day and nonmatching copies included. A one-pass fetch is safe only when
 every copy has the identical own span; otherwise close over the observed keys or

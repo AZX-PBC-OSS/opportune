@@ -1333,6 +1333,49 @@ fn the_fetch_model_preserves_unknown_calendars_and_clears_occurrences_without_a_
     );
 }
 
+/// With no cap there is no occurrence hull and therefore no key observation or
+/// closure: a same-key copy outside the calendar hull stays stripped even though
+/// its in-hull relative would have seeded closure had a cap applied.
+#[test]
+fn no_cap_does_not_close_over_a_calendar_blocks_key() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+    let in_hull = keyed_block(
+        Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+        "evt_uncapped",
+        true,
+    );
+    let far = keyed_block(
+        Span::new(utc(far_day, 10, 0), utc(far_day, 10, 30)).expect("a span"),
+        "evt_uncapped",
+        true,
+    );
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![in_hull.clone(), far]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.occurrences.push(
+        Occurrence::new("evt_uncapped", in_hull.span, vec!["ana".to_owned()])
+            .expect("the occurrence names a participant"),
+    );
+
+    let ranges = required_ranges_of(&request);
+    assert!(ranges.occurrences.is_none());
+    let closed = key_closed_request(&request, &ranges);
+    assert!(closed.occurrences.is_empty());
+    assert_eq!(
+        closed.participants[0].blocks(),
+        &[in_hull],
+        "without a cap, the far same-key block is not an observed-key fetch"
+    );
+}
+
 /// The cap/closure path must preserve an unknown calendar too: turning it into a
 /// known-empty calendar would remove the offer's `calendar_unknown` flag.
 #[test]
@@ -1349,6 +1392,23 @@ fn cap_closure_preserves_an_unknown_calendar() {
         "ana",
         ZoneName::new("UTC").expect("a zone name"),
     ));
+    // Make closure non-vacuous on another participant: preserving `None` only
+    // when there are no observed keys would not prove the contract.
+    let far_day = Date::new(2027, 6, 20).expect("a fixture date");
+    let mut bo = Participant::attendee("bo", ZoneName::new("UTC").expect("a zone name"));
+    bo.calendar = Some(vec![
+        keyed_block(
+            Span::new(utc(day, 10, 0), utc(day, 10, 30)).expect("a span"),
+            "evt_seed",
+            true,
+        ),
+        keyed_block(
+            Span::new(utc(far_day, 10, 0), utc(far_day, 10, 30)).expect("a span"),
+            "evt_seed",
+            true,
+        ),
+    ]);
+    request.participants.push(bo);
     request
         .rules
         .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
@@ -1359,6 +1419,13 @@ fn cap_closure_preserves_an_unknown_calendar() {
     assert!(
         outcome.closed_request.participants[0].calendar.is_none(),
         "closure must not turn an unknown calendar into a known-empty one"
+    );
+    assert!(
+        outcome.closed_request.participants[1]
+            .blocks()
+            .iter()
+            .any(|block| block.span.start() == utc(far_day, 10, 0)),
+        "the other participant's far copy proves closure actually ran"
     );
     assert!(
         outcome.closed.offers[0].calendar_unknown(),
@@ -1673,5 +1740,95 @@ fn closure_retains_an_occurrence_naming_only_participants_outside_the_request() 
     assert!(
         !slot_answer(&participant_filtered, candidate, &["ana"]).0,
         "the same false exclusion reaches confirmation"
+    );
+}
+
+/// An occurrence is a request-global record, so the **initial** fetch must not
+/// participant-filter it either. This one names only somebody outside the
+/// request, and its same-key block lies inside the calendar hull but outside the
+/// occurrence hull: the initial fetch retrieves the block, the block seeds no
+/// closure key, and a participant-filtered occurrence query therefore loses the
+/// occurrence with nothing to recover it. Full data charges the event to nobody;
+/// the filtered fetch charges the block to `ana` on its own day and rejects a
+/// booking there.
+#[test]
+fn an_occurrence_naming_only_outsiders_is_needed_by_the_initial_fetch_too() {
+    let day = Date::new(2027, 6, 16).expect("a fixture date");
+    let next = Date::new(2027, 6, 17).expect("a fixture date");
+    let window = Span::new(utc(day, 9, 0), utc(day, 15, 0)).expect("a window");
+    let candidate = utc(day, 13, 0);
+    // A booking on the day the stripped block sits on: the bucket a
+    // participant-filtered fetch wrongly fills.
+    let next_day_start = utc(next, 13, 0);
+
+    let mut ana = Participant::new("ana", ZoneName::new("UTC").expect("a zone name"));
+    ana.calendar = Some(vec![keyed_block(
+        Span::new(utc(next, 10, 0), utc(next, 10, 30)).expect("a span"),
+        "evt_outsider",
+        true,
+    )]);
+    let mut request = Request::new(
+        utc(day, 9, 0),
+        fixture_goal("UTC", window, candidate, "ana", 30),
+    );
+    request.participants.push(ana);
+    request.occurrences.push(
+        Occurrence::new(
+            "evt_outsider",
+            Span::new(utc(day, 10, 0), utc(day, 11, 0)).expect("a span"),
+            vec!["external".to_owned()],
+        )
+        .expect("an occurrence may name someone outside the request")
+        .with_tags(vec![tag("interview")]),
+    );
+    request
+        .rules
+        .push(interview_cap(CapMeasure::Count, 1, CapPeriod::Day));
+
+    let outcome = fetch_outcome(&request, candidate, &["ana"]);
+    let hull = outcome.ranges.occurrences.expect("the cap applies");
+    let block = &request.participants[0].blocks()[0];
+    assert!(
+        block.span.start() >= hull.end() || hull.start() >= block.span.end(),
+        "the block lies outside the occurrence hull, so it seeds no closure key"
+    );
+    assert!(
+        block.span.start() < outcome.ranges.calendar.end()
+            && outcome.ranges.calendar.start() < block.span.end(),
+        "the block lies inside the calendar hull, so the initial fetch retrieves it"
+    );
+
+    assert_closed_matches_full(&outcome);
+    assert_eq!(
+        outcome.closed_request.occurrences, request.occurrences,
+        "the initial fetch keeps an occurrence no request participant is named on"
+    );
+    assert!(
+        slot_answer(&request, next_day_start, &["ana"]).0,
+        "full data charges the event to nobody, so the block's own day is free"
+    );
+    assert!(
+        slot_answer(&outcome.closed_request, next_day_start, &["ana"]).0,
+        "the closed fetch agrees on that day too"
+    );
+
+    // What a participant-filtered occurrence query leaves behind: the same closed
+    // request with the occurrence gone. No key was observed on an
+    // occurrence-range record, so the closure retrieves nothing and the block
+    // stands alone as `ana`'s event.
+    let mut filtered = outcome.closed_request.clone();
+    filtered.occurrences.clear();
+    let answer = slot_answer(&filtered, next_day_start, &["ana"]);
+    assert!(
+        !answer.0,
+        "dropping the authoritative occurrence falsely charges the block to ana"
+    );
+    assert!(
+        answer
+            .1
+            .iter()
+            .any(|reason| reason.code == ReasonCode::CapReached),
+        "and reports it as the cap: {:?}",
+        answer.1
     );
 }

@@ -652,6 +652,34 @@ mod tests {
     }
 
     #[test]
+    fn self_conflict_construction_is_empty_for_a_one_minute_or_shorter_booking() {
+        let late = IntervalSet::from_spans(vec![
+            MinuteSpan::new(minute(14, 23, 0), minute(15, 0, 0)).unwrap(),
+        ]);
+        let early = IntervalSet::from_spans(vec![
+            MinuteSpan::new(minute(15, 0, 0), minute(15, 1, 0)).unwrap(),
+        ]);
+        for occupied_len in [1, 0, -1, -30] {
+            assert!(
+                self_conflict_spans(
+                    &late,
+                    &early,
+                    &ZoneSchedule::fixed(Zone::utc()),
+                    &[],
+                    occupied_len,
+                )
+                .is_empty(),
+                "occupied_len {occupied_len} must bypass the day-level intersection"
+            );
+        }
+        assert_eq!(
+            self_conflict_spans(&late, &early, &ZoneSchedule::fixed(Zone::utc()), &[], 2),
+            [MinuteSpan::new(minute(14, 23, 59), minute(15, 0, 0)).unwrap()],
+            "two minutes reach both adjacent segments; one minute cannot"
+        );
+    }
+
+    #[test]
     fn widening_saturates_at_the_bottom_of_the_representable_range() {
         // `i64::MIN` itself cannot come out of schedule segmentation — a local
         // date's segment starts inside the date — so the boundary is exercised

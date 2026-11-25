@@ -478,6 +478,10 @@ impl RangesQuery {
 /// 1. Fetch every availability block whose occupied span — its own span widened
 ///    by its travel — overlaps `calendar`, and every occurrence and calendar block
 ///    whose own span overlaps `occurrences`, on every request participant.
+///    `Request::occurrences` is one request-global list, not a per-participant
+///    one: never filter it by the participants an occurrence names. One naming
+///    only people outside the request still overrides a same-key block's span and
+///    participants, and dropping it charges that block separately.
 /// 2. Collect the deduplicated event keys of every **occurrence-range** record
 ///    from step 1 — every occurrence and every calendar block whose own span
 ///    overlaps `occurrences`, on every participant.
