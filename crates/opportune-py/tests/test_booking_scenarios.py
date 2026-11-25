@@ -588,9 +588,10 @@ def test_provider_ids_correlate_through_adapters_and_last_second_check_slot(
 
 
 def test_stored_rules_goals_and_calendars_round_trip_for_document_stores() -> None:
-    """Rules, goals and working calendars persist as canonical JSON (Postgres
-    JSONB, CosmosDB, etc.), upgrade cleanly through `upgrade_*`, hydrate back
-    into strict Pydantic models, and produce identical engine answers.
+    """Rules, goals and working calendars persist as canonical JSON documents
+    (document stores, object storage, JSON columns, etc.), upgrade cleanly through
+    `upgrade_*`, hydrate back into strict Pydantic models, and produce identical
+    engine answers.
     """
     rule_adapter: TypeAdapter[Rule] = TypeAdapter(Rule)
     engine = Engine()

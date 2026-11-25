@@ -6,7 +6,7 @@ stated availability compose in one request. Rule IDs are unique in a request, so
 two presets of the same kind need distinct ``rule_id`` values.
 
 Every preset returns the generated model the engine reads — nothing parallel to
-it — so its output serialises to the wire format, stores in Postgres JSONB, and
+it — so its output serialises to the wire format, persists as a JSON document, and
 plugs straight into a FastAPI route schema.
 
 ``unless`` and its participant-side twins ``and_who`` and ``except_who`` are the

@@ -671,12 +671,14 @@ class RequiredRanges(OpportuneModel):
     )
     calendar: Annotated[
         Span,
-        Field(description="The UTC range every participant's calendar must cover."),
+        Field(
+            description="The UTC range every participant's calendar must cover, planned from the\ngoal's `search_window`.\n\nFetch every block whose occupied span — the block's own span widened by its\n`travel_before` and `travel_after` — overlaps this range, not only blocks\nwhose own span does: a block ending before the range can still occupy a\nminute inside it. A confirmation outside the search window needs a new\nranges query whose window contains the confirmed start."
+        ),
     ]
     occurrences: Annotated[
         Span | None,
         Field(
-            description="The UTC range of the initial occurrence-range fetch, or absent when no cap\napplies.\n\nFetch every occurrence and calendar block whose own span overlaps it, then\napply the one-round event-key closure described on this type. An omitted\nfield and an explicit `null` both read as no occurrence range; the field is\nomitted rather than written as `null`, matching every other optional\nresponse field."
+            description="The UTC range of the initial occurrence-range fetch, or absent when no cap\napplies.\n\nFetch every occurrence and every calendar block whose own span overlaps it,\non every participant, and never filter occurrences by the participants\nthey name: the list is request-global. Then perform the event-key closure:\nfetch every record carrying a key observed on those own-span\noccurrence-range records, on every participant, and evaluate the closed\nrequest. An omitted field and an explicit `null` both read as no occurrence\nrange; the field is omitted rather than written as `null`, matching every\nother optional response field. When that closure cannot be completed, fetch\nthe full supported time domain with `Limits` raised to cover it — raise\n`max_blocks_per_participant` and `max_occurrences`, because the published\ndefaults can refuse that fetch — or fail closed: the caller's own entry\npoint returns an error instead of evaluating narrowed data."
         ),
     ] = None
 

@@ -1,11 +1,12 @@
 //! Versioned upgrades for the documents a caller stores.
 //!
-//! Applications persist rules, calendars and goals — a PostgreSQL `jsonb`
-//! column, say — and the wire format may gain a field between releases. An
-//! upgrade takes such a document together with the schema version it was written
-//! with and returns it in the current version's canonical form: every default
-//! resolved, every value written the one way the current version spells it, and a
-//! fixed point, so upgrading the result again rewrites nothing.
+//! Applications persist rules, calendars and goals as JSON documents — in a
+//! document store, an object store or a JSON column, say — and the wire format may
+//! gain a field between releases. An upgrade takes such a document together with
+//! the schema version it was written with and returns it in the current version's
+//! canonical form: every default resolved, every value written the one way the
+//! current version spells it, and a fixed point, so upgrading the result again
+//! rewrites nothing.
 //!
 //! Canonical spelling covers what the domain normalises: a day key becomes the
 //! list of days it means, a duration becomes the hours and minutes the domain

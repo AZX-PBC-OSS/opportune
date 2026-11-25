@@ -595,17 +595,31 @@ class Engine:
         ``query`` is the ranges query, the request it was projected from, or the
         mapping either is read from.
 
-        The returned hulls begin a two-phase fetch, not a one-pass query: a cap
+        The returned hulls start a two-phase fetch, not a one-pass query: a cap
         merges every record sharing an event key across all supplied time ranges.
-        With ``occurrences`` present, fetch the initial calendar and
-        occurrence-range data, collect the event keys observed on every
-        participant's own-span occurrence-range records, then fetch every record
-        carrying one of those keys on every participant -- all-day and otherwise
-        nonmatching records included -- and evaluate that closed request against a
-        consistent snapshot. A one-pass fetch is key-complete only when every copy
-        of an event has the identical own span; otherwise fetch all occurrences
-        and blocks across the full supported time domain or fail closed. See
-        ``RequiredRanges`` in the Rust documentation for the whole contract.
+
+        **Normal path:** an initial fetch of every block whose occupied span -- its
+        own span widened by its travel -- overlaps ``calendar``, plus every
+        occurrence and block whose own span overlaps ``occurrences``; then
+        event-key closure: collect the keys observed on every participant's
+        own-span occurrence-range records, fetch every record carrying one of those
+        keys on every participant -- all-day and otherwise nonmatching records
+        included -- and evaluate that closed request against a consistent snapshot.
+        Occurrences are one request-global list, never filtered by the participants
+        they name.
+
+        **Confirmation outside the search window:** the hulls cover only instants
+        inside the query's goal search window, so confirming a start outside it
+        needs a new query whose window contains the proposed start, followed by the
+        same initial fetch and event-key closure.
+
+        **Exact closure unavailable:** a one-pass fetch is key-complete only when
+        every copy of an event has the identical own span; otherwise fetch all
+        occurrences and blocks across the full supported time domain with
+        ``Limits`` raised to cover it (``max_blocks_per_participant`` and
+        ``max_occurrences``), or fail closed by returning an error rather than
+        evaluating narrowed data. See ``RequiredRanges`` in the Rust documentation
+        for the whole contract.
 
         :raises OpportuneError: when the document is rejected.
         """

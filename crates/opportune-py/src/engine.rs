@@ -146,11 +146,22 @@ impl Engine {
     /// The calendar and occurrence data a request needs, as a JSON
     /// `RequiredRanges`.
     ///
-    /// `query_json` is the ranges query as JSON. The hulls begin a two-phase
-    /// fetch, not a one-pass query: with `occurrences` present the caller also
-    /// needs every record carrying an event key observed on a participant's
-    /// own-span occurrence-range records, on every participant, or all records
-    /// across the full supported time domain; otherwise it must fail closed.
+    /// `query_json` is the ranges query as JSON. The normal path is an initial
+    /// fetch — blocks whose occupied span, their own span widened by their travel,
+    /// overlaps `calendar`, plus every occurrence and block whose own span overlaps
+    /// `occurrences` — followed by event-key closure: observe the keys on every
+    /// participant's own-span occurrence-range records, then fetch every record
+    /// carrying one of those keys on every participant. Occurrences are one
+    /// request-global list, never filtered by the participants they name.
+    ///
+    /// The hulls cover only the query's goal search window, so a confirmation
+    /// outside it needs a new query whose window contains the proposed start and
+    /// the same initial fetch and event-key closure. When exact closure is
+    /// impossible, fetch the full supported time domain with limits raised to cover
+    /// it (`max_blocks_per_participant` and `max_occurrences`) or fail closed by
+    /// returning an error rather than evaluating narrowed data. See
+    /// `RequiredRanges` in the Rust documentation for the whole contract.
+    ///
     /// Raises `OpportuneError` when the document is rejected.
     fn required_ranges_json(
         &self,

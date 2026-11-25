@@ -1,7 +1,7 @@
-//! Persistence round-trip proof for document stores (Postgres JSONB, `CosmosDB`,
-//! etc.): rules, goals and working calendars serialize to canonical wire JSON,
-//! survive versioned `upgrade_*` calls, parse back into strict domain types,
-//! and produce byte-identical engine answers.
+//! Persistence round-trip proof for JSON document stores (document databases,
+//! object storage, JSON columns, etc.): rules, goals and working calendars
+//! serialize to canonical wire JSON, survive versioned `upgrade_*` calls, parse
+//! back into strict domain types, and produce byte-identical engine answers.
 
 // The byte-identical-answer half needs an engine, so this target runs where the
 // crate compiles in a time zone database; the stripped build's parse, write and

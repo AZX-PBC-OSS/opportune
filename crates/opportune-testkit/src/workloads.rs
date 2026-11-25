@@ -160,7 +160,9 @@ pub fn limit_workloads(engine: &Engine) -> [Workload; 2] {
 /// The zone-period counts the `adversarial` benchmark group measures.
 ///
 /// The largest is the engine's default `max_zone_periods_per_participant`, so the
-/// group spans the most fragmented schedule a valid request can carry.
+/// group spans the most fragmented schedule a valid request can carry. There is no
+/// latency target for this group: the readings show how the self-conflict
+/// construction scales with the schedule, and no gate asserts a wall-clock bound.
 pub const REST_ZONE_PERIOD_SIZES: [usize; 6] = [32, 64, 128, 256, 512, 1_000];
 
 /// The zone the rest-scaling participant is normally in: no daylight saving, so

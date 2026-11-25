@@ -97,6 +97,10 @@ pub fn key_closed_request(request: &Request, ranges: &RequiredRanges) -> Request
             });
         }
     }
+    // The second disjunct is load-bearing: an occurrence outside the hull is still
+    // authoritative for its event's span, so dropping it re-buckets a same-key
+    // in-hull block into the candidate's own bucket. Pinned by
+    // `tests/fetch_occurrence_closure_test.rs`.
     closed.occurrences.retain(|occurrence| {
         overlaps(occurrence.span, occurrences) || observed.contains(&occurrence.event_key)
     });

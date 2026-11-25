@@ -212,16 +212,25 @@ export class Engine {
    * a caller already holds is one argument rather than a second document to build by
    * hand. Fields outside those six are still sent, and still rejected.
    *
-   * The returned hulls begin a two-phase fetch, not a one-pass query: a cap merges
-   * every record sharing an event key across all supplied time ranges. With
-   * `occurrences` present, fetch the initial calendar and occurrence-range data,
-   * collect the event keys observed on every participant's own-span
-   * occurrence-range records, then fetch every record carrying one of those keys on
-   * every participant — all-day and otherwise nonmatching records included — and
-   * evaluate that closed request against a consistent snapshot. A one-pass fetch is
-   * key-complete only when every copy of an event has the identical own span;
-   * otherwise fetch all occurrences and blocks across the full supported time domain
-   * or fail closed. See `RequiredRanges` in `opportune` for the whole contract.
+   * The returned hulls start a two-phase fetch, not a one-pass query: a cap merges
+   * every record sharing an event key across all supplied time ranges.
+   *
+   * The normal path is an initial fetch — every block whose occupied span, its own
+   * span widened by its travel, overlaps `calendar`, plus every occurrence and
+   * block whose own span overlaps `occurrences` — followed by event-key closure:
+   * observe the keys on every participant's own-span occurrence-range records, then
+   * fetch every record carrying one of those keys on every participant, all-day and
+   * otherwise nonmatching records included, and evaluate that closed request
+   * against a consistent snapshot. Occurrences are one request-global list, never
+   * filtered by the participants they name.
+   *
+   * The hulls cover only instants inside the query's goal search window, so a
+   * confirmation outside it needs a new query whose window contains the proposed
+   * start and the same initial fetch and event-key closure. When exact closure is
+   * impossible, fetch the full supported time domain with limits raised to cover it
+   * (`max_blocks_per_participant` and `max_occurrences`) or fail closed by returning
+   * an error rather than evaluating narrowed data. See `RequiredRanges` in
+   * `opportune` for the whole contract.
    *
    * @throws OpportuneError when the query is rejected.
    */

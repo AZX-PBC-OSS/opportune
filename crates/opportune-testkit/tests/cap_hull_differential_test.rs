@@ -1,20 +1,28 @@
-//! Differential probe for the occurrence hull a participant-zone cap needs.
+//! Differential probes for the two halves of a cap's fetch closure.
 //!
-//! A cap buckets an existing event by the date its own start reads in the zone in
-//! force at that instant, not by the zone in force during the search window. Two
-//! instants the participant reads in different zones can therefore share one
-//! bucket: a booking during a leg and an existing event after the participant is
-//! home again, later in the same day, week or month. This probe builds that shape
-//! from the outside in — a leg over the window, a candidate inside it and a
-//! counted event outside it whose own-zone label matches — and checks the two
-//! things the range answer promises: the returned occurrence hull contains the
-//! counted event, and removing data outside the returned ranges leaves the
-//! availability answer alone.
+//! **Occurrence-hull half.** A cap buckets an existing event by the date its own
+//! start reads in the zone in force at that instant, not by the zone in force
+//! during the search window. Two instants the participant reads in different
+//! zones can therefore share one bucket: a booking during a leg and an existing
+//! event after the participant is home again, later in the same day, week or
+//! month. These probes build that shape from the outside in — a leg over the
+//! window, a candidate inside it and a counted event outside it whose own-zone
+//! label matches — and check the two things the range answer promises: the
+//! returned occurrence hull contains the counted event, and removing data outside
+//! the returned ranges leaves the availability answer alone.
 //!
-//! The generator cannot be relied on for this shape: it places events at small
-//! offsets around the window and cannot arrange the shared label across two
-//! zones, which is why this is a probe rather than one more property over
-//! generated cases.
+//! **Key-closure half.** A cap merges every record sharing an event key across all
+//! supplied time ranges, so the initial hulls are not key-complete. A record just
+//! outside a hull can extend an event into the candidate's bucket, or move its
+//! start out of it, and it may be a block, an occurrence or an all-day record the
+//! hull did not select. These fixtures build each shape from the outside in, prove
+//! the one-pass fetch diverges, and require the documented two-phase fetch —
+//! initial hulls plus one round of event-key closure — to match the full answer.
+//!
+//! The generator cannot be relied on for either shape: it places events at small
+//! offsets around the window and cannot arrange a shared label across two zones or
+//! a record carrying an observed key outside the hull, which is why these are
+//! probes rather than properties over generated cases.
 
 use std::sync::OnceLock;
 
@@ -752,16 +760,7 @@ fn a_window_at_the_start_of_the_range_hulls_the_minutes_it_can_hold() {
 }
 
 // ---------------------------------------------------------------------------
-// Cap inputs are key-complete, not one-pass.
-//
-// A cap merges every record sharing an event key across all supplied time
-// ranges. Fetching only the records that overlap the returned hulls therefore
-// answers a different question from the caller who supplied everything: a
-// record just outside the hull can extend an event into the candidate's bucket,
-// or move its start out of it. These fixtures build each shape from the outside
-// in, prove the one-pass fetch diverges, and require the documented two-phase
-// fetch — initial hulls plus one round of event-key closure — to match the full
-// answer.
+// Key-closure half: cap inputs are key-complete, not one-pass (see the header).
 // ---------------------------------------------------------------------------
 
 /// The ranges the engine asks for `request`.

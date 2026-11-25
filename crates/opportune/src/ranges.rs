@@ -20,18 +20,34 @@
 //! data a cap counts has to be fetched over that range, not just the calendar
 //! range, or a cap would see a quiet day where the caller has bookings.
 //!
-//! The returned hulls begin a two-phase fetch, not a one-pass query: a cap merges
-//! every record sharing an event key across all supplied time ranges. After the
-//! initial calendar and occurrence-range fetch, the caller collects the event keys
-//! observed on every participant's own-span occurrence-range records and fetches
-//! every record carrying those keys — all-day and otherwise nonmatching records
-//! included, on every participant. One round settles because every record carries
-//! at most one event key, and the closed request must be evaluated against a
-//! consistent provider snapshot. A one-pass fetch is key-complete only when every
-//! copy of an event has the identical own span; otherwise it can miss a same-key
-//! record outside the hull and answer with a false offer or exclusion. When exact
-//! closure is impossible, the caller fetches all occurrences and blocks across the
-//! full supported time domain (`Span::EVERYTHING`) or fails closed.
+//! The returned hulls start a two-phase fetch, not a one-pass query: a cap merges
+//! every record sharing an event key across all supplied time ranges. The normal
+//! path is an initial fetch — every block whose occupied span, its own span widened
+//! by its travel, overlaps the calendar hull, plus every occurrence and block whose
+//! own span overlaps the occurrence hull — followed by event-key closure: collect
+//! the keys observed on every participant's own-span occurrence-range records and
+//! fetch every record carrying those keys, all-day and otherwise nonmatching
+//! records included, on every participant. Occurrences are one request-global
+//! list, never filtered by the participants they name. One round settles because
+//! every record carries at most one event key, and the closed request is judged
+//! against a consistent provider snapshot.
+//!
+//! Both hulls are planned from `Goal::search_window` and cover only instants
+//! inside it. `check_slot` ignores the search window, so confirming an instant
+//! outside it needs a second `RangesQuery` whose window contains that instant,
+//! followed by the same initial fetch and event-key closure; the search's hulls do
+//! not travel with the confirmation.
+//!
+//! A one-pass fetch is key-complete only when every copy of an event has the
+//! identical own span; otherwise it can miss a same-key record outside the hull and
+//! answer with a false offer or exclusion. When exact closure is impossible, the
+//! caller fetches all occurrences and blocks across the full supported time domain
+//! (`Span::EVERYTHING`) with `Limits` raised to cover it — raise
+//! `max_blocks_per_participant` and `max_occurrences` with
+//! [`Limits::with_max_blocks_per_participant`](crate::Limits::with_max_blocks_per_participant)
+//! and [`Limits::with_max_occurrences`](crate::Limits::with_max_occurrences) — or
+//! fails closed by returning an error from its own entry point; never evaluate a
+//! narrowed request as partial cap data.
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};

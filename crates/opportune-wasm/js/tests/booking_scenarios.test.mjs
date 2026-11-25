@@ -923,7 +923,7 @@ test("stored rules, goals and calendars round-trip through upgrade entry points 
     holidays: ["2027-03-09"],
   };
 
-  // Persist as JSON (e.g. Postgres JSONB or CosmosDB), upgrade on read, and
+  // Persist as a JSON document, upgrade on read, and
   // confirm the engine produces byte-identical availability output.
   const reloadedRules = originalRules.map((rule) => JSON.parse(upgradeRule(JSON.stringify(rule), 1)));
   const reloadedGoal = JSON.parse(upgradeGoal(JSON.stringify(originalGoal), 1));

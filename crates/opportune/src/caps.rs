@@ -19,12 +19,21 @@
 //! Because events merge by key across every supplied range, cap inputs must be
 //! key-complete: a record outside the initial fetch hull that shares a key with an
 //! observed event can extend that event's span or move its start into another
-//! bucket. The caller fetches the initial hulls, then every record carrying a key
-//! observed on an own-span occurrence-range record, on every participant
-//! (`RequiredRanges` describes the contract), or falls back to the full supported
-//! time domain or fails closed. Prefiltering the
-//! fetch by the cap's tags is unsafe: an occurrence's tags and every same-key
-//! block's tags are unioned before `count` is matched.
+//! bucket. The normal path is an initial fetch — blocks whose occupied span, their
+//! own span widened by their travel, overlaps the calendar hull — then event-key
+//! closure: every record carrying a key observed on an own-span occurrence-range
+//! record, on every participant. Occurrences are one request-global list, never
+//! filtered by the participants they name. `RequiredRanges` describes the contract.
+//!
+//! These hulls cover only instants inside `Goal::search_window`; a confirmation
+//! outside it needs a new `RangesQuery` containing the proposed start and the same
+//! initial fetch and event-key closure. When exact closure is impossible the caller
+//! falls back to the full supported time domain with `Limits` raised to cover it
+//! (`max_blocks_per_participant` and `max_occurrences`) or fails closed by
+//! returning an error rather than evaluating a narrowed request.
+//!
+//! Prefiltering the fetch by the cap's tags is unsafe: an occurrence's tags and
+//! every same-key block's tags are unioned before `count` is matched.
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};

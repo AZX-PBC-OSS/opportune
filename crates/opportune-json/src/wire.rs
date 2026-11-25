@@ -1372,28 +1372,60 @@ pub struct WireSlotCheck {
 
 /// One UTC envelope of data a request needs.
 ///
-/// The hulls begin a two-phase fetch rather than a one-pass query: a cap merges
-/// every record sharing an event key across all supplied time ranges. Fetch the
-/// initial ranges, collect every event key observed on each participant's
-/// own-span occurrence-range records, then fetch every record carrying one of
-/// those keys — on every participant, all-day and otherwise nonmatching records
-/// included — and evaluate that closed request against a consistent snapshot. A
-/// one-pass fetch is key-complete only when every copy of an event has the
-/// identical own span; otherwise fetch the full supported time domain or fail
-/// closed. See the Rust `RequiredRanges` documentation for the whole contract.
+/// Ask for this before a search or a confirmation when the request can be capped
+/// or calendars come from a provider. `calendar` is the hull the search window's
+/// civil days cover; `occurrences` is the hull of the cap buckets the window
+/// touches, or absent when no cap applies.
+///
+/// The hulls start a two-phase fetch, not a one-pass query: a cap merges every
+/// record sharing an event key across all supplied time ranges. **Initial fetch:**
+/// every block whose occupied span — its own span widened by its travel — overlaps
+/// `calendar`, and every occurrence and block whose own span overlaps
+/// `occurrences`. **Event-key closure:** collect the event keys observed on those
+/// own-span occurrence-range records, then fetch every record carrying one of those
+/// keys on every participant, all-day and otherwise nonmatching records included,
+/// and judge that closed request against a consistent snapshot. `occurrences` is one
+/// request-global list: fetch every occurrence, never filtering by the participants
+/// one names.
+///
+/// **Confirmation outside the search window:** the hulls cover only instants inside
+/// the goal's `search_window`, but `check_slot` ignores that window. Confirming a
+/// start outside it needs a new ranges query whose window contains the start,
+/// followed by the same initial fetch and event-key closure.
+///
+/// **Exact closure unavailable:** a one-pass fetch is key-complete only when every
+/// copy of an event has the identical own span; otherwise fetch the full supported
+/// time domain with limits raised to cover it (`max_blocks_per_participant` and
+/// `max_occurrences`), or fail closed by returning an error rather than evaluating
+/// narrowed data. See the Rust `RequiredRanges` documentation for the whole
+/// contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WireRequiredRanges {
-    /// The UTC range every participant's calendar must cover.
+    /// The UTC range every participant's calendar must cover, planned from the
+    /// goal's `search_window`.
+    ///
+    /// Fetch every block whose occupied span — the block's own span widened by its
+    /// `travel_before` and `travel_after` — overlaps this range, not only blocks
+    /// whose own span does: a block ending before the range can still occupy a
+    /// minute inside it. A confirmation outside the search window needs a new
+    /// ranges query whose window contains the confirmed start.
     pub calendar: WireSpan,
     /// The UTC range of the initial occurrence-range fetch, or absent when no cap
     /// applies.
     ///
-    /// Fetch every occurrence and calendar block whose own span overlaps it, then
-    /// apply the one-round event-key closure described on this type. An omitted
-    /// field and an explicit `null` both read as no occurrence range; the field is
-    /// omitted rather than written as `null`, matching every other optional
-    /// response field.
+    /// Fetch every occurrence and every calendar block whose own span overlaps it,
+    /// on every participant, and never filter occurrences by the participants
+    /// they name: the list is request-global. Then perform the event-key closure:
+    /// fetch every record carrying a key observed on those own-span
+    /// occurrence-range records, on every participant, and evaluate the closed
+    /// request. An omitted field and an explicit `null` both read as no occurrence
+    /// range; the field is omitted rather than written as `null`, matching every
+    /// other optional response field. When that closure cannot be completed, fetch
+    /// the full supported time domain with `Limits` raised to cover it — raise
+    /// `max_blocks_per_participant` and `max_occurrences`, because the published
+    /// defaults can refuse that fetch — or fail closed: the caller's own entry
+    /// point returns an error instead of evaluating narrowed data.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurrences: Option<WireSpan>,
 }

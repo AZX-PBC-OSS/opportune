@@ -30,10 +30,10 @@ the JSON Schema; the preset and sugar helpers take `camelCase` options
 generated models are aliased so `Meta.schema_` is the field while `schema` is the
 wire key.
 
-The nine scenarios are followed by [production blueprints](#production-blueprints)
-for the decisions every booking service has to make outside the engine: committing
-a slot atomically, weighting a round-robin pool, counting a shared event once,
-running one engine per limit profile, and the v1 product-model limits below.
+The nine scenarios are followed by [integration notes](#integration-notes) on the
+engine boundary: confirming a proposal, weighting a round-robin pool, counting a
+shared event once, and one engine per limit profile. The [v1 product
+model](#before-you-build-v1-product-model) lists the shapes every recipe uses.
 
 ## Before you build: v1 product model
 
@@ -3014,85 +3014,36 @@ the options object is the third argument for `calendarViewToBlocks` and
 the browser, module Web Worker, and adapter runtime limits and the `opportune/presets`
 subpath are in [WASM and TypeScript](wasm.md#graph-and-google-adapters).
 
-## Production blueprints
+## Integration notes
 
-These are application-side patterns. The engine stays pure; the transaction,
-dispatch loop and tenant lifecycle belong to your service.
+The engine stays a pure scheduler: it computes offers and judgments from the
+request it is handed. These notes cover the boundary around those calls —
+confirming a proposal, weighting a round-robin pool, counting a shared event
+once, and one engine per limit profile.
 
-### Committing a booking atomically
+### Confirming a proposal
 
-`check_slot` is a fresh check, not a lock. Re-read the participant's blocks inside
-the transaction, let `check_slot` judge the proposal, then persist the event and
-its travel holds before committing. Lock participants in **ID order** so two
-concurrent bookings cannot deadlock.
+`check_slot` is a fresh predicate, not a lock. It judges a proposal against the
+calendars, occurrences and rules in the request it is given; it reads no store
+and writes nothing. The caller owns persistence and concurrency.
 
-```sql
-BEGIN ISOLATION LEVEL REPEATABLE READ;
--- Every read below shares one snapshot; a serialization failure aborts the
--- booking attempt rather than evaluating data from different snapshots.
--- 1. Serialize writers for every participant the booking needs, in ID order.
-SELECT id FROM participants WHERE id = ANY($participant_ids) ORDER BY id FOR UPDATE;
--- The no-op update is required with REPEATABLE READ: a lock wait alone leaves
--- the waiter's pre-wait snapshot in place. Updating the rows makes a competing
--- writer's lock wait fail with a serialization error instead of reading stale
--- calendar data.
-UPDATE participants SET id = id WHERE id = ANY($participant_ids);
+The engine sees only the data it is given. An already-committed booking or travel
+hold must be supplied back as calendar data — a block on the participant carrying
+the event's `event_key`, and the offer's `reserve` spans written on each
+participant's calendar — before the next search or `check_slot` call. A record
+the request does not contain cannot block a later proposal.
 
--- 2. Initial fetch: every block whose occupied span (its span plus its travel)
---    overlaps the calendar hull, and every occurrence and block whose own span
---    overlaps the occurrence hull. Do not prefilter by the cap's tags, status or
---    all_day: a same-key copy on another participant can supply a counted tag.
---    $request_participant_ids includes attendees and non-cap-covered participants.
---    Occurrences are a request-global list, not a per-participant one: do not
---    participant-filter them in either phase. One naming only people outside the
---    request still overrides a same-key block's span and participants, and
---    dropping it charges that block to its own participant separately.
-SELECT id, participant_id, event_key, span, status, all_day, tags,
-       travel_before, travel_after
-  FROM calendar_blocks
- WHERE participant_id = ANY($request_participant_ids)
-   AND (tstzrange(lower(span) - travel_before,
-                  upper(span) + travel_after, '[)') && $calendar_hull
-        OR span && $occurrence_hull);
-SELECT id, event_key, span, participants, tags FROM occurrences
- WHERE span && $occurrence_hull;
+`required_ranges` fetch hulls apply only to instants inside `goal.search_window`.
+Confirming a start outside that window needs a new `RangesQuery` whose window
+contains the proposed start, with the same two-phase fetch and event-key closure
+applied to that query, before `check_slot` judges the proposal. Otherwise the
+hulls cover the search window's buckets, not the proposal's, and caps or blocks
+that should decide the slot can be absent from the request.
 
--- 3. Close over the event keys the occurrence-hull rows of that fetch observed,
---    on every participant -- not only the ones a cap covers. One round settles
---    because every record carries at most one event key.
-SELECT id, participant_id, event_key, span, status, all_day, tags,
-       travel_before, travel_after
-  FROM calendar_blocks
- WHERE participant_id = ANY($request_participant_ids)
-   AND event_key = ANY($observed_keys);
--- Request-global for the reason step 2 gives: an occurrence dropped here would
--- let its same-key block be charged separately.
-SELECT id, event_key, span, participants, tags FROM occurrences
- WHERE event_key = ANY($observed_keys);
-
--- 4. Union the initial and closure rows, deduplicating by stable provider record
---    identity ((participant_id, id) for blocks, id for occurrences), never by
---    event_key. Rebuild the Request, then call check_slot(request, proposal).
---    A malformed proposal is an application error; valid = false is a conflict.
--- 5. Insert the booking with a unique (participant_id, span) constraint as the
---    last line of defence, and write the offer's reserve spans as holds.
-INSERT INTO bookings (event_key, participant_id, span) VALUES (...);
-INSERT INTO holds (participant_id, span, kind) VALUES (...);
-COMMIT;
-```
-
-Using only step 2 — the initial hull fetch — is the one-pass mistake: a record
-just outside the hulls that shares an observed event key can extend a
-minutes-capped event, move a count-capped event to another bucket, or supply the
-tag that brings an event into the cap's `count`. Close over `$observed_keys` (or
-fetch the full supported time domain, or fail closed) before calling
-`check_slot`. A one-pass read is safe only when every copy of an event has the
-identical own span.
-
-Use the same `event_key` on the booking and every hold, so a later reschedule can
-pass it in `exclude_event_keys`. Return `409` for `valid: false` after the
-re-read, not a `200` with an empty answer, so the client knows to pick another
-slot.
+`Offer::to_proposal` bridges a search result and the confirmation: pass the offer
+straight back, and `check_slot` reports every failing reason with `valid: false`.
+A malformed proposal — an unknown part, the wrong number of terms or hosts — is a
+typed error instead; see [`check_slot` and proposals](api.md#check_slot-and-proposals).
 
 ### Weighting a round-robin pool
 
@@ -3137,6 +3088,17 @@ all-day and nonmatching copies included. A one-pass fetch is safe only when
 every copy has the identical own span; otherwise close over the observed keys or
 fetch the full supported time domain, or the cap can answer with a false offer
 or a false exclusion.
+
+The hulls are scoped to `goal.search_window`; confirming an instant outside it
+needs a new `RangesQuery` whose window contains that instant (see
+[confirming a proposal](#confirming-a-proposal)). Fetching the full supported
+time domain is the other complete fetch, but it requires raised limits —
+`max_blocks_per_participant` and `max_occurrences`, via
+`Engine::builder().limits(...)` / `opportune.limits_with(...)` /
+`limitsWith({...})` — and at the defaults the engine rejects such a request with
+`blocks_limit` or `occurrences_limit`. Failing closed means the caller returns an
+error from its own entry point rather than evaluating a narrowed request; the
+engine cannot distinguish a complete fetch from a partial one.
 
 ### One engine per limit profile
 

@@ -461,52 +461,77 @@ impl RangesQuery {
 
 /// One UTC envelope of data a request needs.
 ///
-/// `calendar` is the hull every participant's local dates in the padded search
-/// window fall inside, covering blocking events, clearance, the effective travel
-/// of the participants the query names and neighbouring `rest` days.
-/// `occurrences` is `None` when no cap applies; when a cap is present it is the
-/// hull of every bucket the search window touches in the cap's own zone. The
-/// engine returns it from
-/// [`Engine::required_ranges`](crate::Engine::required_ranges).
+/// Call [`Engine::required_ranges`](crate::Engine::required_ranges) before a
+/// search or a confirmation when the request can be capped or when calendars come
+/// from a provider: it says which records a caller must load so
+/// [`Engine::find_availability`](crate::Engine::find_availability) or
+/// [`Engine::check_slot`](crate::Engine::check_slot) can answer from complete
+/// data. `calendar` is the
+/// hull every participant's local dates in the padded search window fall inside,
+/// covering blocking events, clearance, the effective travel of the participants
+/// the query names and neighbouring `rest` days. `occurrences` is `None` when no
+/// cap applies; when a cap is present it is the hull of every bucket the search
+/// window touches in the cap's own zone.
 ///
-/// # The fetch is two-phase, not one pass
+/// # The normal path: an initial fetch, then event-key closure
 ///
-/// A cap merges every record sharing an event key across all supplied time
-/// ranges, so these hulls are the input to a contract, not the whole fetch. With
-/// `occurrences` present:
+/// The hulls start a two-phase fetch, not a one-pass query. A cap merges every
+/// record sharing an event key across all supplied time ranges, so finishing the
+/// fetch means closing over the keys the hulls observe:
 ///
-/// 1. Fetch every availability block whose occupied span — its own span widened
-///    by its travel — overlaps `calendar`, and every occurrence and calendar block
-///    whose own span overlaps `occurrences`, on every request participant.
-///    `Request::occurrences` is one request-global list, not a per-participant
-///    one: never filter it by the participants an occurrence names. One naming
-///    only people outside the request still overrides a same-key block's span and
-///    participants, and dropping it charges that block separately.
-/// 2. Collect the deduplicated event keys of every **occurrence-range** record
-///    from step 1 — every occurrence and every calendar block whose own span
-///    overlaps `occurrences`, on every participant.
-/// 3. Fetch every occurrence and every block carrying one of those keys, on every
-///    request participant, across the supported time domain. Include all-day and
-///    otherwise nonmatching records, and deduplicate by provider record identity
-///    rather than by event key. One round settles because every record carries at
-///    most one event key.
-/// 4. Evaluate only the closed request, against a consistent provider snapshot.
+/// 1. **Initial fetch.** Fetch every availability block whose occupied span — its
+///    own span widened by its travel — overlaps `calendar`, and every occurrence
+///    and calendar block whose own span overlaps `occurrences`, on every request
+///    participant.
+/// 2. **Observe keys.** Collect the deduplicated event keys of every record from
+///    step 1 whose own span overlaps `occurrences` — every occurrence and every
+///    calendar block, on every participant.
+/// 3. **Event-key closure.** Fetch every occurrence and every block carrying one
+///    of those keys, on every request participant, across the supported time
+///    domain. Include all-day and otherwise nonmatching records, and deduplicate
+///    by provider record identity rather than by event key. One round settles
+///    because every record carries at most one event key.
+/// 4. **Evaluate the closed request.** Judge the search or confirmation against
+///    that request and a consistent provider snapshot.
 ///
-/// Do not prefilter step 1 by cap tags, status or `all_day`: a cap's `count`
-/// matches the union of an occurrence's tags with every same-key block's, so a
-/// record another participant holds can supply the counted tag. A one-pass fetch
-/// can therefore produce a false offer — an out-of-hull same-key block missing
-/// from a minutes cap — or a false exclusion — an out-of-hull same-key block that
-/// would have moved a count event to another bucket.
+/// `Request::occurrences` is one request-global list, not a per-participant one:
+/// never filter it by the participants an occurrence names. One naming only
+/// people outside the request still overrides a same-key block's span and
+/// participants, and dropping it charges that block separately. Do not prefilter
+/// step 1 by cap tags, status or `all_day`: a cap's `count` matches the union of an
+/// occurrence's tags with every same-key block's, so a record another participant
+/// holds can supply the counted tag. A one-pass fetch can therefore produce a
+/// false offer — an out-of-hull same-key block missing from a minutes cap — or a
+/// false exclusion — an out-of-hull same-key block that would have moved a count
+/// event to another bucket.
+///
+/// # Edge case: confirming a start outside the search window
+///
+/// The hulls are planned from `Goal::search_window` and cover only instants inside
+/// it, but `check_slot` ignores that window. A reschedule, drag-and-drop or "book
+/// this instead" flow may confirm a start outside it: plan a second `RangesQuery`
+/// whose `goal.search_window` contains that start, then repeat the initial fetch
+/// and event-key closure above. The search's hulls do not travel with the
+/// confirmation; reusing them strips records the window did not touch, so a spent
+/// cap or a blocked minute can read as free.
+///
+/// # Edge case: exact closure is unavailable
 ///
 /// A one-pass fetch is key-complete only under a caller-enforced invariant: every
 /// occurrence and block sharing an event key has the identical own span.
 /// Per-instance keys alone are not enough when split copies can carry different
 /// spans. When closure cannot be completed exactly, fetch all occurrences and
 /// blocks across the full supported time domain (`Span::EVERYTHING`,
-/// `1975-01-01T00:00Z..2100-01-01T00:00Z`) or fail closed; never evaluate partial
-/// cap data as an empty workload. The full supported domain is a fallback data
-/// requirement, not a replacement for the narrow `occurrences` hull.
+/// `1975-01-01T00:00Z..2100-01-01T00:00Z`) with [`crate::Limits`] raised to cover
+/// it. The published defaults (`max_blocks_per_participant` 10,000 and
+/// `max_occurrences` 50,000) refuse that fetch with `blocks_limit` or
+/// `occurrences_limit` on a calendar large enough to need it; raise them with
+/// [`crate::Limits::with_max_blocks_per_participant`] and
+/// [`crate::Limits::with_max_occurrences`]. Or fail closed: the caller's own entry
+/// point returns an error rather than evaluating a narrowed request as partial cap
+/// data. The engine cannot detect a partial fetch, so no engine call fails closed,
+/// and the full domain is a fallback data requirement rather than a replacement for
+/// the narrow `occurrences` hull.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RequiredRanges {
@@ -525,12 +550,15 @@ pub struct RequiredRanges {
     ///
     /// Fetch every occurrence and every calendar block whose own span overlaps
     /// this range, on every participant — including attendees and participants no
-    /// cap covers — without prefiltering by tags, status or `all_day`. Then apply
-    /// the one-round key closure described on the type: every record carrying an
-    /// observed event key is needed even when it lies outside this range, and a
-    /// one-pass fetch is key-complete only under the identical-own-span
-    /// invariant. When that closure cannot be completed, fetch the full supported
-    /// time domain (`Span::EVERYTHING`) or fail closed.
+    /// cap covers — without prefiltering by tags, status or `all_day`, and never
+    /// filtering occurrences by the participants they name: the list is
+    /// request-global. Then apply the event-key closure described on the type:
+    /// every record carrying an observed event key is needed even when it lies
+    /// outside this range, and a one-pass fetch is key-complete only under the
+    /// identical-own-span invariant. When that closure cannot be completed, fetch
+    /// the full supported time domain (`Span::EVERYTHING`) with [`crate::Limits`]
+    /// raised to cover it (`max_blocks_per_participant` and `max_occurrences`) or
+    /// fail closed by returning an error rather than evaluating narrowed data.
     pub occurrences: Option<Span>,
 }
 

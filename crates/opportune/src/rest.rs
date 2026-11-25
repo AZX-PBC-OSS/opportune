@@ -596,6 +596,14 @@ mod tests {
                                 }
                                 let mut widened = Vec::new();
                                 intersect_day_segments(&late, &early, occupied_len, &mut widened);
+                                // Cost invariant, not an output contract: one span
+                                // per late and early segment, never their product.
+                                assert!(
+                                    widened.len() <= late.len() + early.len(),
+                                    "late {late:?}, early {early:?}, occupied_len \
+                                     {occupied_len}: {} spans exceed the per-segment bound",
+                                    widened.len()
+                                );
                                 assert_eq!(
                                     covered(&widened),
                                     covered(&pairwise_reference(&late, &early, occupied_len)),
@@ -743,13 +751,22 @@ mod tests {
             .iter()
             .flat_map(|&(late, early)| pairwise_reference(late, early, occupied_len))
             .collect();
-        assert_eq!(
-            blocked,
-            [
-                MinuteSpan::new(minute(14, 23, 1), minute(15, 0, 0)).unwrap(),
-                MinuteSpan::new(minute(15, 23, 1), minute(16, 0, 0)).unwrap(),
-            ],
-            "one span per day pair, appended in this fixture's date order"
+        // Cost invariant, not an output contract: production canonicalises this
+        // `Vec` before any reader sees it, so order and per-pair multiplicity are
+        // unobservable. For a date pair carrying `L` late and `E` early segments
+        // the pairwise product emits up to `L × E` spans while widening each side
+        // once and intersecting emits at most `L + E`; pin that bound so a return
+        // to the product fails here, without breaking on a behaviour-preserving
+        // reordering or merge.
+        let span_bound: usize = day_pairs
+            .iter()
+            .map(|&(late, early)| late.len() + early.len())
+            .sum();
+        assert!(
+            blocked.len() <= span_bound,
+            "at most one span per late and early segment on a date pair, \
+             got {} for a bound of {span_bound}",
+            blocked.len()
         );
         assert_eq!(covered(&blocked), covered(&expected));
 
