@@ -16,17 +16,17 @@ publish = false
 # The caret requirement is not decoration: cargo-deny's `wildcards = "deny"` rejects
 # a version-free path dependency. It keeps every intra-workspace requirement on this
 # release train, and release-please's TOML updater moves it with the version.
-opportune = { path = "../opportune", version = "0.2.0" }
+opportune = { path = "../opportune", version = "0.2.1" }
 # The golden corpus is written and re-read through the wire layer itself, so a
 # golden cannot describe a document the wire layer would not produce. `schema` is
 # enabled here only through `opportune-adapters` below, for the exporter that feeds
 # the Python codegen; the testkit's own tests use no schema.
-opportune-json = { path = "../opportune-json", version = "0.2.0", default-features = false }
+opportune-json = { path = "../opportune-json", version = "0.2.1", default-features = false }
 # The combined schema the binding models are generated from is the adapters' own
 # bundle, which is the wire layer's schema with the adapter envelopes added. Only
 # `schema` is on: the exporter reads the document and converts no payload, and the
 # Windows zone mapping stays out of this graph.
-opportune-adapters = { path = "../opportune-adapters", version = "0.2.0", default-features = false, features = [
+opportune-adapters = { path = "../opportune-adapters", version = "0.2.1", default-features = false, features = [
   "schema",
 ] }
 proptest = "1"
