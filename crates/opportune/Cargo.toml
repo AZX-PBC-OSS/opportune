@@ -40,7 +40,7 @@ bundled-tzdb = ["dep:jiff-tzdb", "jiff/tzdb-bundle-always"]
 # Default features are off so the ambient system time zone can never creep into
 # the core: only the feature sets named here are available, and the wasm32 set
 # below is the sole definition of what compiles there.
-jiff = { version = "1.0.1", default-features = false, features = [
+jiff = { version = "1.0.2", default-features = false, features = [
   "alloc",
   "perf-inline",
 ] }
@@ -54,7 +54,7 @@ jiff-tzdb = { version = "1.0.0", optional = true }
 # is what keeps the wasm32 graph std-free: features across the two declarations
 # unify per target, and only the matching declaration applies.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-jiff = { version = "1.0.1", default-features = false, features = [
+jiff = { version = "1.0.2", default-features = false, features = [
   "std",
   "tzdb-zoneinfo",
   "tzdb-concatenated",

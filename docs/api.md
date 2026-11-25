@@ -901,7 +901,7 @@ functions for exactly that reason.
 
 Install the `cp312-abi3` wheel (Python 3.12+; one wheel per platform bundles the
 compiled Rust engine, generated Pydantic models, and provider adapters, with
-`pydantic>=2.14` as the sole runtime dependency):
+`pydantic>=2.14.4` as the sole runtime dependency):
 
 ```sh
 pip install opportune

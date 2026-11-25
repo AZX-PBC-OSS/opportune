@@ -21,7 +21,7 @@ or with `uv`:
 uv add opportune
 ```
 
-Requires Python 3.12+ and `pydantic>=2.14`.
+Requires Python 3.12+ and `pydantic>=2.14.4`.
 
 ## Quickstart
 
