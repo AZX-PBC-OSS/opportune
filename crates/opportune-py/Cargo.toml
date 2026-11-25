@@ -18,12 +18,12 @@ crate-type = ["cdylib"]
 # The caret requirement is not decoration: cargo-deny's `wildcards = "deny"`
 # rejects a version-free path dependency. It keeps every intra-workspace requirement
 # on this release train, and release-please's TOML updater moves it with the version.
-opportune = { path = "../opportune", version = "0.2.0" }
+opportune = { path = "../opportune", version = "0.2.1" }
 # Bindings cross the language boundary with JSON only; opportune-json owns the wire
 # types and conversions the JSON entry points are built on. `default-features = false`
 # keeps `schemars` out of the wheel: the Python binding reads and writes the wire
 # types directly, and schema generation stays a consumer of the Rust crate.
-opportune-json = { path = "../opportune-json", version = "0.2.0", default-features = false }
+opportune-json = { path = "../opportune-json", version = "0.2.1", default-features = false }
 # The Graph and Google payload conversions cross the boundary as JSON too, so the
 # binding exposes the adapter entry points rather than re-implementing them in
 # Python. Default features are off and the providers and the bundled database are
@@ -31,7 +31,7 @@ opportune-json = { path = "../opportune-json", version = "0.2.0", default-featur
 # crate's own `windows-zones` feature reaches, which is what keeps it out of a
 # minimal build, and `bundled-tzdb` keeps the adapter's bundled-database entry
 # points — and the zone data the shared engine needs — in the wheel.
-opportune-adapters = { path = "../opportune-adapters", version = "0.2.0", default-features = false, features = [
+opportune-adapters = { path = "../opportune-adapters", version = "0.2.1", default-features = false, features = [
   "graph",
   "google",
   "json",

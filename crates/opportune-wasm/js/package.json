@@ -1,6 +1,6 @@
 {
   "name": "opportune",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Availability scheduling: WASM binding of the opportune engine for JavaScript and TypeScript.",
   "author": "AZX, PBC. <oss@azx.io>",
   "license": "MIT OR Apache-2.0",

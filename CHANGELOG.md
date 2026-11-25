@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/AZX-PBC-OSS/opportune/compare/v0.2.0...v0.2.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* correct cap inputs and scheduling contracts ([0c5e56f](https://github.com/AZX-PBC-OSS/opportune/commit/0c5e56fdefcf773e90a50d694c5137cabffb3919))
+
 ## [0.2.0](https://github.com/AZX-PBC-OSS/opportune/compare/v0.1.0...v0.2.0) (2026-11-24)
 
 
