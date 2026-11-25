@@ -13,6 +13,7 @@ use opportune::Engine;
 use opportune::model::{RangesQuery, Response};
 use opportune::time::{Date, Instant, TimeZoneDatabase};
 use opportune_testkit::a1::{A1Case, A1Oracle, BlockPlan, RulePlan, compare_with_oracle};
+use opportune_testkit::fetch::key_closed_request;
 use opportune_testkit::generators::a1_case;
 use proptest::prelude::*;
 
@@ -217,10 +218,9 @@ fn with_data_outside_the_window(case: &A1Case) -> A1Case {
 
     let minute = |minutes: i64| Instant::from_minutes(minutes).expect("the range is supported");
     let blocks = variant.participant.calendar.get_or_insert_with(Vec::new);
-    // Each injected block carries its own key. A key shared between an event the
-    // range keeps and one two months away would make the two one merged event
-    // whose start the strip moves, which is not the unrelated data this fixture
-    // is about: a real event instance's copies share a span, not a season.
+    // Each injected block carries its own key, keeping this an unrelated-data
+    // control. Shared-key copies across the hull need closure and are covered by
+    // the cap-fetch fixtures, not by this deliberately non-colliding property.
     blocks.push(busy_block("far-past", early, early_end, 60, 60));
     blocks.push(busy_block("far-future", late, late_end, 60, 60));
     // Ending where the window begins, so only the padding before the window can
@@ -321,39 +321,22 @@ proptest! {
         query.participants.clone_from(&request.participants);
         let ranges = engine().required_ranges(&query).unwrap();
 
-        let mut stripped = request.clone();
-        let mut removed = 0usize;
         // Zone periods are not fetched data: the caller supplies the whole
         // schedule, and `required_ranges` never asks for one. Only blocks and
         // occurrences are fetched over the returned ranges, so only those are
-        // stripped here.
-        for participant in &mut stripped.participants {
-            if let Some(blocks) = &mut participant.calendar {
-                let count = blocks.len();
-                blocks.retain(|block| {
-                    let start = block
-                        .span
-                        .start()
-                        .minutes()
-                        .saturating_sub(block.travel_before.minutes());
-                    let end = block
-                        .span
-                        .end()
-                        .minutes()
-                        .saturating_add(block.travel_after.minutes());
-                    let inside_calendar = start < ranges.calendar.end().minutes()
-                        && ranges.calendar.start().minutes() < end;
-                    // A cap counts events over the occurrence hull, so a block a
-                    // touched bucket holds has to stay even when it lies outside
-                    // the calendar hull.
-                    let inside_occurrences = ranges.occurrences.as_ref().is_some_and(|span| {
-                        start < span.end().minutes() && span.start().minutes() < end
-                    });
-                    inside_calendar || inside_occurrences
-                });
-                removed += count - blocks.len();
-            }
-        }
+        // stripped — with the documented key closure, not the one-pass fetch.
+        let before = request
+            .participants
+            .iter()
+            .map(|participant| participant.blocks().len())
+            .sum::<usize>();
+        let stripped = key_closed_request(&request, &ranges);
+        let removed = before
+            - stripped
+                .participants
+                .iter()
+                .map(|participant| participant.blocks().len())
+                .sum::<usize>();
         // Without this the property can quietly stop proving anything: a
         // narrower generator, or a hull that grows to cover the whole supported
         // range, would leave nothing to strip and the comparison below would

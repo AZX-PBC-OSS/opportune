@@ -12,6 +12,7 @@
 pub mod a1;
 pub mod a2;
 pub mod canonical;
+pub mod fetch;
 pub mod generators;
 pub mod json_goldens;
 pub mod matching;

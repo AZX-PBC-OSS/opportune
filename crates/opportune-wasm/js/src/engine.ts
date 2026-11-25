@@ -212,6 +212,17 @@ export class Engine {
    * a caller already holds is one argument rather than a second document to build by
    * hand. Fields outside those six are still sent, and still rejected.
    *
+   * The returned hulls begin a two-phase fetch, not a one-pass query: a cap merges
+   * every record sharing an event key across all supplied time ranges. With
+   * `occurrences` present, fetch the initial calendar and occurrence-range data,
+   * collect the event keys observed on every participant's own-span
+   * occurrence-range records, then fetch every record carrying one of those keys on
+   * every participant — all-day and otherwise nonmatching records included — and
+   * evaluate that closed request against a consistent snapshot. A one-pass fetch is
+   * key-complete only when every copy of an event has the identical own span;
+   * otherwise fetch all occurrences and blocks across the full supported time domain
+   * or fail closed. See `RequiredRanges` in `opportune` for the whole contract.
+   *
    * @throws OpportuneError when the query is rejected.
    */
   requiredRanges(query: RangesQuery | Request): RequiredRanges {
@@ -469,12 +480,17 @@ export function validateJson(request: Request): string {
   return shared().validateJson(request);
 }
 
-/** The data `query` needs, from the shared engine; `query` may be a whole request. */
+/**
+ * The data `query` needs, from the shared engine; `query` may be a whole request.
+ * The returned hulls require the two-phase, all-participant event-key closure
+ * {@link Engine.requiredRanges} describes; one-pass cap fetching is safe only
+ * under the identical-own-span invariant.
+ */
 export function requiredRanges(query: RangesQuery | Request): RequiredRanges {
   return shared().requiredRanges(query);
 }
 
-/** The same ranges as {@link requiredRanges}, as their JSON text. */
+/** The same ranges and two-phase fetch contract as {@link requiredRanges}, as JSON. */
 export function requiredRangesJson(query: RangesQuery | Request): string {
   return shared().requiredRangesJson(query);
 }

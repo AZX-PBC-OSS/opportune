@@ -19,6 +19,19 @@
 //! the event zone, a fixed zone, or each participant's piecewise zone. Calendar
 //! data a cap counts has to be fetched over that range, not just the calendar
 //! range, or a cap would see a quiet day where the caller has bookings.
+//!
+//! The returned hulls begin a two-phase fetch, not a one-pass query: a cap merges
+//! every record sharing an event key across all supplied time ranges. After the
+//! initial calendar and occurrence-range fetch, the caller collects the event keys
+//! observed on every participant's own-span occurrence-range records and fetches
+//! every record carrying those keys — all-day and otherwise nonmatching records
+//! included, on every participant. One round settles because every record carries
+//! at most one event key, and the closed request must be evaluated against a
+//! consistent provider snapshot. A one-pass fetch is key-complete only when every
+//! copy of an event has the identical own span; otherwise it can miss a same-key
+//! record outside the hull and answer with a false offer or exclusion. When exact
+//! closure is impossible, the caller fetches all occurrences and blocks across the
+//! full supported time domain (`Span::EVERYTHING`) or fails closed.
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};

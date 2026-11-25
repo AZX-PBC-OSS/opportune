@@ -446,6 +446,17 @@ pub fn validate(engine: &Engine, request_json: &str) -> Result<String, JsonError
 /// # }
 /// ```
 ///
+/// The hulls begin a two-phase fetch, not a one-pass query. With `occurrences`
+/// present, fetch the initial calendar and occurrence-range data, collect the
+/// event keys observed on every participant's own-span occurrence-range records,
+/// then fetch every record carrying one of those keys on every participant —
+/// all-day and otherwise nonmatching records included — and evaluate the closed
+/// request against a consistent provider snapshot. A one-pass fetch is
+/// key-complete only when every copy of an event has the identical own span;
+/// otherwise fetch all occurrences and blocks across the full supported time
+/// domain or fail closed. The Rust `RequiredRanges` documentation carries the
+/// whole contract.
+///
 /// # Errors
 /// Returns [`JsonError`] when the document is rejected, as
 /// [`parse_ranges_query`] reports it, and the engine's own failure when the query

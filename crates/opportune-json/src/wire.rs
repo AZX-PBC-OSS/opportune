@@ -1371,16 +1371,29 @@ pub struct WireSlotCheck {
 }
 
 /// One UTC envelope of data a request needs.
+///
+/// The hulls begin a two-phase fetch rather than a one-pass query: a cap merges
+/// every record sharing an event key across all supplied time ranges. Fetch the
+/// initial ranges, collect every event key observed on each participant's
+/// own-span occurrence-range records, then fetch every record carrying one of
+/// those keys — on every participant, all-day and otherwise nonmatching records
+/// included — and evaluate that closed request against a consistent snapshot. A
+/// one-pass fetch is key-complete only when every copy of an event has the
+/// identical own span; otherwise fetch the full supported time domain or fail
+/// closed. See the Rust `RequiredRanges` documentation for the whole contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WireRequiredRanges {
     /// The UTC range every participant's calendar must cover.
     pub calendar: WireSpan,
-    /// The UTC range occurrence data must cover, or absent when no cap applies.
+    /// The UTC range of the initial occurrence-range fetch, or absent when no cap
+    /// applies.
     ///
-    /// An omitted field and an explicit `null` both read as no occurrence range;
-    /// the field is omitted rather than written as `null`, matching every other
-    /// optional response field.
+    /// Fetch every occurrence and calendar block whose own span overlaps it, then
+    /// apply the one-round event-key closure described on this type. An omitted
+    /// field and an explicit `null` both read as no occurrence range; the field is
+    /// omitted rather than written as `null`, matching every other optional
+    /// response field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurrences: Option<WireSpan>,
 }

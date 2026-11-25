@@ -170,6 +170,8 @@ Every query exists in both typed and raw-JSON forms: `findAvailability` / `findA
 
 `requiredRanges` accepts either a `RangesQuery` or a full `Request`, projecting away the six fields not needed for fetch-range planning (`occurrences`, `exclude_event_keys`, `calendars`, `weights`, `limit`, and `explain`) while still validating unknown keys.
 
+The returned hulls begin a two-phase fetch, not a one-pass query: a cap merges every record sharing an event key across all supplied time ranges. With `occurrences` present, fetch the initial calendar and occurrence-range data on every participant, collect the event keys observed on their own-span occurrence-range records, then fetch every record carrying one of those keys — all-day and otherwise nonmatching records included — on every participant, and evaluate that closed request against a consistent snapshot. A one-pass fetch is key-complete only when every copy of an event has the identical own span; otherwise fetch all occurrences and blocks across the full supported time domain or fail closed. A one-pass cap fetch can change offers, exclusions and date counts.
+
 Every failure throws `OpportuneError` carrying `code`, `message`, RFC 6901 `path`, and per-field `errors`:
 
 <!-- snippet: wasm-ts-errors -->
@@ -310,6 +312,8 @@ console.log(engine.tzdbVersion);   // the version a response's `meta.tzdb` repor
 `opportune/adapters/graph` and `opportune/adapters/google` convert recorded provider payloads into domain blocks and rules with no network or clock access. Per-calendar provider errors — or unreadable single-calendar responses — return an `unavailable` outcome carrying an error code instead of an empty block list (which would falsely read as free time). Unreadable batch payloads (`getSchedule`, `freeBusy`) throw `OpportuneError` with code `payload_invalid`.
 
 For Graph, follow `@odata.nextLink` and pass the concatenated `value` array: a single page is `payload_invalid` because the rest would read as free. Recurring occurrences derive distinct event keys from `originalStart` (`<key>@<utc>`), so a series is not counted once. A `getSchedule` entry with no `scheduleItems` is free only when its `availabilityView` is all free; busy slots without items make that calendar `payload_invalid`. For Google, follow `nextPageToken` before calling `eventsListToBlocks` for the same reason.
+
+Cap closure pages need the same completeness as the initial fetch: follow every page and query by the event keys the initial fetch observed, because a same-key copy outside the returned hulls can change a cap's answer. When the provider has no exact key lookup, keep an application event-key index or mirror and close over that, or fetch the full supported time domain, or fail closed.
 
 <!-- snippet: wasm-ts-adapters -->
 ```ts

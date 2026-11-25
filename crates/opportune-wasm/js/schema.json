@@ -1526,7 +1526,7 @@
       "type": "object"
     },
     "RequiredRanges": {
-      "description": "One UTC envelope of data a request needs.",
+      "description": "One UTC envelope of data a request needs.\n\nThe hulls begin a two-phase fetch rather than a one-pass query: a cap merges\nevery record sharing an event key across all supplied time ranges. Fetch the\ninitial ranges, collect every event key observed on each participant's\nown-span occurrence-range records, then fetch every record carrying one of\nthose keys — on every participant, all-day and otherwise nonmatching records\nincluded — and evaluate that closed request against a consistent snapshot. A\none-pass fetch is key-complete only when every copy of an event has the\nidentical own span; otherwise fetch the full supported time domain or fail\nclosed. See the Rust `RequiredRanges` documentation for the whole contract.",
       "properties": {
         "calendar": {
           "$ref": "#/$defs/Span",
@@ -1541,7 +1541,7 @@
               "type": "null"
             }
           ],
-          "description": "The UTC range occurrence data must cover, or absent when no cap applies.\n\nAn omitted field and an explicit `null` both read as no occurrence range;\nthe field is omitted rather than written as `null`, matching every other\noptional response field."
+          "description": "The UTC range of the initial occurrence-range fetch, or absent when no cap\napplies.\n\nFetch every occurrence and calendar block whose own span overlaps it, then\napply the one-round event-key closure described on this type. An omitted\nfield and an explicit `null` both read as no occurrence range; the field is\nomitted rather than written as `null`, matching every other optional\nresponse field."
         }
       },
       "required": [

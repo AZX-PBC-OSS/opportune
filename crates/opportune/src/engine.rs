@@ -250,6 +250,21 @@ impl Engine {
     /// assert!(ranges.occurrences.is_none());
     /// # }
     /// ```
+    ///
+    /// The returned hulls begin the documented two-phase fetch, not a one-pass
+    /// query: a cap merges every record sharing an event key across all supplied
+    /// time ranges. Fetch the initial calendar and occurrence hulls, collect the
+    /// event keys observed on every participant's own-span occurrence-range
+    /// records, then fetch every record carrying one of those keys — on every
+    /// participant, including all-day and otherwise nonmatching records. Evaluate
+    /// the closed request against a consistent provider snapshot. A one-pass
+    /// fetch is key-complete only when every copy of an event has the identical
+    /// own span; otherwise a same-key record outside the hull can produce a false
+    /// offer or a false exclusion. When exact closure is unavailable, fetch all
+    /// occurrences and blocks across the full supported time domain
+    /// (`Span::EVERYTHING`) or fail closed. [`RequiredRanges`] carries the whole
+    /// contract.
+    ///
     /// # Errors
     /// Returns [`Error::PartCount`] for a goal that does not have exactly one
     /// part, [`Error::InvalidRequest`] carrying the same findings the request
@@ -400,6 +415,11 @@ pub fn validate(request: &Request) -> Diagnostics {
 
 /// The data a request needs, using a default engine with the bundled database
 /// and default limits.
+///
+/// The returned hulls begin the two-phase fetch [`Engine::required_ranges`]
+/// documents: fetch the initial calendar and occurrence hulls, then every record
+/// carrying an event key observed on an own-span occurrence-range record, or fetch
+/// the full supported time domain or fail closed.
 ///
 /// # Errors
 /// Returns [`crate::time::TimeError::TzdbBundledUnavailable`] wrapped in an

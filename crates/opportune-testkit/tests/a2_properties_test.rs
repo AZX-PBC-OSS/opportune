@@ -21,6 +21,7 @@ use opportune_testkit::a1::{BlockPlan, CapPlan, OccurrencePlan, RestPlan, RulePl
 use opportune_testkit::a2::{
     A2Case, A2Rule, compare_with_oracle, excluded_reasons, offered_starts,
 };
+use opportune_testkit::fetch::key_closed_request;
 use opportune_testkit::generators::a2_case;
 use proptest::prelude::*;
 
@@ -357,47 +358,25 @@ proptest! {
         query.participants.clone_from(&request.participants);
         let ranges = engine().required_ranges(&query).unwrap();
 
-        let mut stripped = request.clone();
-        let mut removed = 0usize;
         // Zone periods are not fetched data: the caller supplies the whole
         // schedule, and `required_ranges` never asks for one. Only blocks and
         // occurrences are fetched over the returned ranges, so only those are
-        // stripped here.
-        for participant in &mut stripped.participants {
-            if let Some(blocks) = &mut participant.calendar {
-                let count = blocks.len();
-                blocks.retain(|block| {
-                    let start = block
-                        .span
-                        .start()
-                        .minutes()
-                        .saturating_sub(block.travel_before.minutes());
-                    let end = block
-                        .span
-                        .end()
-                        .minutes()
-                        .saturating_add(block.travel_after.minutes());
-                    let inside_calendar = start < ranges.calendar.end().minutes()
-                        && ranges.calendar.start().minutes() < end;
-                    // A cap counts events over the occurrence hull, so a block a
-                    // touched bucket holds has to stay even when it lies outside
-                    // the calendar hull.
-                    let inside_occurrences = ranges.occurrences.as_ref().is_some_and(|span| {
-                        start < span.end().minutes() && span.start().minutes() < end
-                    });
-                    inside_calendar || inside_occurrences
-                });
-                removed += count - blocks.len();
-            }
-        }
-        if let Some(span) = &ranges.occurrences {
-            let count = stripped.occurrences.len();
-            stripped.occurrences.retain(|occurrence| {
-                occurrence.span.start().minutes() < span.end().minutes()
-                    && span.start().minutes() < occurrence.span.end().minutes()
-            });
-            removed += count - stripped.occurrences.len();
-        }
+        // stripped — with the documented key closure, not the one-pass fetch.
+        let blocks_before = request
+            .participants
+            .iter()
+            .map(|participant| participant.blocks().len())
+            .sum::<usize>();
+        let occurrences_before = request.occurrences.len();
+        let stripped = key_closed_request(&request, &ranges);
+        let removed = blocks_before
+            + occurrences_before
+            - stripped
+                .participants
+                .iter()
+                .map(|participant| participant.blocks().len())
+                .sum::<usize>()
+            - stripped.occurrences.len();
         prop_assert!(
             removed > 0,
             "nothing lay outside {}..{}, so stripping proved nothing",

@@ -595,6 +595,18 @@ class Engine:
         ``query`` is the ranges query, the request it was projected from, or the
         mapping either is read from.
 
+        The returned hulls begin a two-phase fetch, not a one-pass query: a cap
+        merges every record sharing an event key across all supplied time ranges.
+        With ``occurrences`` present, fetch the initial calendar and
+        occurrence-range data, collect the event keys observed on every
+        participant's own-span occurrence-range records, then fetch every record
+        carrying one of those keys on every participant -- all-day and otherwise
+        nonmatching records included -- and evaluate that closed request against a
+        consistent snapshot. A one-pass fetch is key-complete only when every copy
+        of an event has the identical own span; otherwise fetch all occurrences
+        and blocks across the full supported time domain or fail closed. See
+        ``RequiredRanges`` in the Rust documentation for the whole contract.
+
         :raises OpportuneError: when the document is rejected.
         """
         return _answer(
@@ -612,6 +624,9 @@ class Engine:
 
     def required_ranges_json(self, query: RangesQuery | Request | Mapping[str, object]) -> str:
         """The same ranges as :meth:`required_ranges`, as their JSON text.
+
+        The two-phase fetch contract :meth:`required_ranges` describes applies to
+        these ranges unchanged.
 
         :raises OpportuneError: when the document is rejected.
         """
@@ -935,7 +950,9 @@ def required_ranges(query: RangesQuery | Request | Mapping[str, object]) -> Requ
     """The data a request needs, from the shared engine.
 
     ``query`` is the ranges query, the request it was projected from, or the mapping
-    either is read from.
+    either is read from. The returned hulls require the two-phase, all-participant
+    event-key closure :meth:`Engine.required_ranges` describes; a one-pass cap fetch
+    is safe only under the identical-own-span invariant.
     """
     return default_engine().required_ranges(query)
 
@@ -948,7 +965,7 @@ async def required_ranges_async(
 
 
 def required_ranges_json(query: RangesQuery | Request | Mapping[str, object]) -> str:
-    """The same ranges as :func:`required_ranges`, as their JSON text."""
+    """The same ranges and two-phase fetch contract as :func:`required_ranges`, as JSON."""
     return default_engine().required_ranges_json(query)
 
 

@@ -100,6 +100,10 @@ class _Engine:
     def required_ranges_json(self, query_json: str) -> str:
         """Return the data a request needs, as a JSON required-ranges value.
 
+        The hulls begin a two-phase fetch: with occurrences present, close over
+        every event key observed on every participant's own-span occurrence-range
+        records, or fetch the full supported time domain or fail closed.
+
         :raises OpportuneError: when the document is rejected.
         """
 

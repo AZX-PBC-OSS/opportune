@@ -98,6 +98,12 @@ impl Engine {
     /// The calendar and occurrence data a ranges query needs, as a JSON
     /// `RequiredRanges`.
     ///
+    /// The hulls begin a two-phase fetch: with `occurrences` present the caller
+    /// also needs every record carrying an event key observed on a participant's
+    /// own-span occurrence-range records, on every participant, or all records
+    /// across the full supported time domain; otherwise it must fail closed. A
+    /// one-pass fetch is key-complete only under the identical-own-span invariant.
+    ///
     /// # Errors
     /// Returns [`JsonError`] when the query document is rejected.
     pub fn required_ranges_json(&self, query_json: &str) -> Result<String, JsonError> {

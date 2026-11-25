@@ -167,7 +167,7 @@ the caller has to have before the search:
 ```rust
 pub struct RequiredRanges {
     pub calendar: Span,          // UTC range every participant's calendar must cover
-    pub occurrences: Option<Span>, // the occurrence range, `None` when no cap applies
+    pub occurrences: Option<Span>, // initial occurrence-range fetch, `None` when no cap applies
 }
 ```
 
@@ -184,11 +184,55 @@ block the first offered start is included, and so is the neighboring day a
 whose span plus travel overlaps `calendar`.) `occurrences` is present only when
 a cap applies, and it covers every bucket the search window touches in the cap's
 own zone — those days for a per-day cap, and the whole weeks or months they fall
-in for the longer periods. **Because caps count both `occurrences` and matching
-calendar blocks, fetch cap-counted calendar blocks over the union of `calendar`
-and `occurrences` whenever `occurrences` is present.** (`RangesQuery.now` is
-carried for wire symmetry with `Request` and does not clip the fetch hull.) Data
-outside these ranges (subject to block-travel overlap) cannot change the answer.
+in for the longer periods. (`RangesQuery.now` is carried for wire symmetry with
+`Request` and does not clip the fetch hull.)
+
+**The returned hulls are the first phase of a two-phase fetch, not the whole
+query.** A cap merges every record sharing an `event_key` across all supplied
+time ranges, so a caller who stops at the hulls can silently get the wrong
+answer. When `occurrences` is present:
+
+1. Fetch every block whose occupied span — its span widened by its
+   `travel_before`/`travel_after` — overlaps `calendar`, and every occurrence and
+   calendar block whose own span overlaps `occurrences`, on **every** request
+   participant. Do not prefilter by the cap's `count` tags, a block's status, or
+   `all_day`.
+2. Collect the deduplicated event keys of every **occurrence-range** record from
+   step 1 — every occurrence and every calendar block whose own span overlaps
+   `occurrences`, on every participant.
+3. Fetch every occurrence and every block carrying one of those keys, on every
+   request participant, across the supported time domain — all-day and otherwise
+   nonmatching records included. Deduplicate by provider record identity, never by
+   event key.
+4. Evaluate only that closed request, against a consistent provider snapshot.
+
+The out-of-hull copies matter because cap matching unions an occurrence's tags
+with every same-key block's. A later same-key block extends a minutes-capped
+event and can cause a **false offer**; an earlier one moves a count-capped event
+to another bucket and can cause a **false exclusion**; an all-day or otherwise
+nonmatching block on another participant can supply the tag that brings an event
+into the cap's `count`.
+
+A single-pass fetch is key-complete only under a caller-enforced invariant:
+**every occurrence and block sharing an event key has the identical own span**.
+Per-instance keys alone are not enough when split copies can carry different
+spans. If exact closure cannot be completed, fetch **all occurrences and blocks
+across the full supported time domain** (`Span::EVERYTHING`,
+`1975-01-01T00:00Z..2100-01-01T00:00Z`) or fail closed; never evaluate partial
+cap data as an empty workload. The full supported domain is a fallback data
+requirement, not a replacement for the narrow `occurrences` hull. Data outside
+the closed fetch — records with unobserved keys — cannot change the answer;
+data outside the hulls that shares an observed key can.
+
+> **Caller action required.** Callers using caps must implement the two-phase
+> fetch above, or enforce the identical-own-span invariant, before relying on
+> `RequiredRanges`. A one-pass fetch can change offers, exclusions and date
+> counts.
+
+Direct Graph and Google callers face the same requirement: closure pages need the
+same completeness — follow every page and query by the observed event keys — and
+an application event-key index or mirror is recommended when the provider has no
+exact key lookup.
 
 `required_ranges` does not require a prior `validate`: a query whose goal is not
 exactly one part is refused with `Error::PartCount`, and a query whose participant
@@ -341,9 +385,14 @@ and clamp an application-computed score before inserting it.
 `Request::occurrences` is how a shared event is counted once for a pooled cap:
 one `Occurrence` carries the event's `event_key`, `span`, `participants` and
 `tags`, and every participant's calendar block with that key is treated as the
-same event. Build it with `Occurrence::new(key, span, participants)` and attach
-tags with `Occurrence::with_tags`; `required_ranges` reports the bucket hull the
-caller must fetch as `occurrences`. See [the occurrence blueprint](recipes.md#counting-a-shared-event-once)
+same event. The occurrence is authoritative for the span and participants, while
+the event's tags are the **union** of the occurrence's and every same-key
+block's, so a block can bring the event into a cap's `count` even when the
+occurrence carries no matching tag. Build it with
+`Occurrence::new(key, span, participants)` and attach tags with
+`Occurrence::with_tags`; `required_ranges` reports the initial bucket hull as
+`occurrences`, and the caller must then close over the observed event keys as
+described above. See [the occurrence blueprint](recipes.md#counting-a-shared-event-once)
 for the whole pattern.
 
 `Request::calendars` names the `CalendarSpec`s a `LeadTimeMax::WorkingDays` horizon
@@ -992,7 +1041,7 @@ both helpers raise `pydantic.ValidationError` for a value the model rejects.
 - **Loosening tiers (`opportune.unless` / `opportune.presets.unless`):** Returns a rule with a selector excluded from `when` so a narrower tier can loosen a broader rule instead of intersecting to empty. Passing `True` excludes every booking, causing `validate` to report `when_matches_no_part`.
 - **Human-only hosts (`opportune.presets.and_who` / `except_who`):** The participant-side twins of `unless`, also exported as `opportune.and_who` / `opportune.except_who`. They narrow `who` by intersection rather than replacing it, so `presets.and_who(presets.business_hours(), {"kind": "person"})` keeps the default `{"role": "host"}` clause beside the kind clause and reaches human hosts alone — not attendees, not resource rooms. `presets.except_who(presets.cap_per_day({"tag": "interview"}, 2), {"ids": ["ceo"]})` exempts the CEO while every other host stays subject. Passing `who={"kind": "person"}` to a builder instead replaces the default outright and also matches attendees.
 - **Rescheduling:** Pass `Request(exclude_event_keys=[...])` to ignore the event being moved during blocking, rest, and cap evaluation.
-- **Shared events (`Request(occurrences=[...])`):** Build `Occurrence(event_key=..., span=..., participants=[...])` once for a multi-participant event so a pooled cap counts it once; `Occurrence.tags` (or `with_updates(occurrence, tags=[...])`) is what a cap's `count` selector sees.
+- **Shared events (`Request(occurrences=[...])`):** Build `Occurrence(event_key=..., span=..., participants=[...])` once for a multi-participant event so a pooled cap counts it once. A cap's `count` selector sees the union of `Occurrence.tags` (settable with `with_updates(occurrence, tags=[...])`) and every same-key block's tags.
 - **Public route projections:** `opportune.public_response(response: Response | Mapping[str, object])` and `opportune.public_slot_check(check: SlotCheck | Mapping[str, object])` return `PublicResponse` / `PublicSlotCheck`, dropping operator-only fields (`warnings`, `excluded`, `excluded_truncated`, each offer's `eligible`/`assignment`/`reserve`, and a slot check's `reasons`, `reserve`, and `warnings`). Each helper reads the model or the document it was stored or received as — a mapping read back from a cache, queue, or JSON column — and rejects a malformed document with `OpportuneError` code `invalid_argument` naming the field, never a raw `AttributeError` or `pydantic.ValidationError`. The full `Response` and `SlotCheck` stay unchanged for operator routes; public booking routes must explicitly project through `public_response` / `public_slot_check` to avoid leaking internal host IDs, rules, or calendar details.
 - **Single-part sugar (`opportune.sugar`):** `single_goal` (supports `display_zone`, `grid`, `candidates`, `part_id`, `tags`, and `travel`), `person`, `at_least`, and `offer_start`, `offer_end`, `offer_assigned_hosts`, `offer_calendar_unknown`, `offer_reserve`, and `offer_to_proposal` (accepting either an `Offer` model or a raw dict). Sugar builds the standard models with no parallel semantics.
 

@@ -676,7 +676,7 @@ class RequiredRanges(OpportuneModel):
     occurrences: Annotated[
         Span | None,
         Field(
-            description="The UTC range occurrence data must cover, or absent when no cap applies.\n\nAn omitted field and an explicit `null` both read as no occurrence range;\nthe field is omitted rather than written as `null`, matching every other\noptional response field."
+            description="The UTC range of the initial occurrence-range fetch, or absent when no cap\napplies.\n\nFetch every occurrence and calendar block whose own span overlaps it, then\napply the one-round event-key closure described on this type. An omitted\nfield and an explicit `null` both read as no occurrence range; the field is\nomitted rather than written as `null`, matching every other optional\nresponse field."
         ),
     ] = None
 

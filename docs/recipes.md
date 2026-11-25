@@ -3027,22 +3027,63 @@ its travel holds before committing. Lock participants in **ID order** so two
 concurrent bookings cannot deadlock.
 
 ```sql
-BEGIN;
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+-- Every read below shares one snapshot; a serialization failure aborts the
+-- booking attempt rather than evaluating data from different snapshots.
 -- 1. Serialize writers for every participant the booking needs, in ID order.
 SELECT id FROM participants WHERE id = ANY($participant_ids) ORDER BY id FOR UPDATE;
+-- The no-op update is required with REPEATABLE READ: a lock wait alone leaves
+-- the waiter's pre-wait snapshot in place. Updating the rows makes a competing
+-- writer's lock wait fail with a serialization error instead of reading stale
+-- calendar data.
+UPDATE participants SET id = id WHERE id = ANY($participant_ids);
 
--- 2. Re-read the calendar rows and occurrences the request was built from.
-SELECT event_key, span, tags FROM calendar_blocks
- WHERE participant_id = ANY($participant_ids) AND span && $fetch_hull;
+-- 2. Initial fetch: every block whose occupied span (its span plus its travel)
+--    overlaps the calendar hull, and every occurrence and block whose own span
+--    overlaps the occurrence hull. Do not prefilter by the cap's tags, status or
+--    all_day: a same-key copy on another participant can supply a counted tag.
+--    $request_participant_ids includes attendees and non-cap-covered participants.
+SELECT id, participant_id, event_key, span, status, all_day, tags,
+       travel_before, travel_after
+  FROM calendar_blocks
+ WHERE participant_id = ANY($request_participant_ids)
+   AND (tstzrange(lower(span) - travel_before,
+                  upper(span) + travel_after, '[)') && $calendar_hull
+        OR span && $occurrence_hull);
+SELECT id, event_key, span, participants, tags FROM occurrences
+ WHERE participants && $request_participant_ids
+   AND span && $occurrence_hull;
 
--- 3. Rebuild the Request, then call check_slot(request, proposal) in the service.
+-- 3. Close over the event keys the occurrence-hull rows of that fetch observed,
+--    on every participant -- not only the ones a cap covers. One round settles
+--    because every record carries at most one event key.
+SELECT id, participant_id, event_key, span, status, all_day, tags,
+       travel_before, travel_after
+  FROM calendar_blocks
+ WHERE participant_id = ANY($request_participant_ids)
+   AND event_key = ANY($observed_keys);
+SELECT id, event_key, span, participants, tags FROM occurrences
+ WHERE participants && $request_participant_ids
+   AND event_key = ANY($observed_keys);
+
+-- 4. Union the initial and closure rows, deduplicating by stable provider record
+--    identity ((participant_id, id) for blocks, id for occurrences), never by
+--    event_key. Rebuild the Request, then call check_slot(request, proposal).
 --    A malformed proposal is an application error; valid = false is a conflict.
--- 4. Insert the booking with a unique (participant_id, span) constraint as the
+-- 5. Insert the booking with a unique (participant_id, span) constraint as the
 --    last line of defence, and write the offer's reserve spans as holds.
 INSERT INTO bookings (event_key, participant_id, span) VALUES (...);
 INSERT INTO holds (participant_id, span, kind) VALUES (...);
 COMMIT;
 ```
+
+Using only step 2 — the initial hull fetch — is the one-pass mistake: a record
+just outside the hulls that shares an observed event key can extend a
+minutes-capped event, move a count-capped event to another bucket, or supply the
+tag that brings an event into the cap's `count`. Close over `$observed_keys` (or
+fetch the full supported time domain, or fail closed) before calling
+`check_slot`. A one-pass read is safe only when every copy of an event has the
+identical own span.
 
 Use the same `event_key` on the booking and every hold, so a later reschedule can
 pass it in `exclude_event_keys`. Return `409` for `valid: false` after the
@@ -3077,9 +3118,20 @@ request.occurrences = vec![occurrence];
 ```
 
 Every block with `event_key == "interview-42"` is then the same event: the
-occurrence is authoritative for the span and participants, and its tags are what a
-cap's `count` selector sees. `required_ranges` returns the `occurrences` hull
-beside the calendar hull; fetch cap-counted blocks over the union of the two.
+occurrence is authoritative for the span and participants, while the event's tags
+are the **union** of the occurrence's and every same-key block's. A block copy
+can therefore bring the event into a cap's `count` even when the occurrence has no
+matching tag.
+
+`required_ranges` returns the initial `occurrences` hull beside the calendar hull,
+and that is phase one only. Fetch every block whose occupied span overlaps the
+calendar hull, plus every occurrence and block whose own span overlaps the
+occurrence hull, on every participant. Collect keys only from those
+occurrence-hull records, then fetch every record carrying one of those keys —
+all-day and nonmatching copies included. A one-pass fetch is safe only when
+every copy has the identical own span; otherwise close over the observed keys or
+fetch the full supported time domain, or the cap can answer with a false offer
+or a false exclusion.
 
 ### One engine per limit profile
 
