@@ -56,7 +56,6 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import {
   cpSync,
   existsSync,
@@ -74,9 +73,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import test from "node:test";
 import shellQuote from "shell-quote";
 import { parse as parseYaml } from "yaml";
-
-/** The TypeScript parser the package already installs for its build and module-graph gates. */
-const TS = createRequire(import.meta.url)("typescript");
+import { isCall, isMember, nodeText, parseSource, walk } from "./support/ast.mjs";
 
 /** This suite sits at `crates/opportune-wasm/js/tests`, so the root is four levels up. */
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
@@ -523,15 +520,14 @@ function markdownScripts(file, content) {
 
 /** Whether a node is the module name of Node's process-spawning API. */
 function isChildProcessModule(node) {
-  return TS.isStringLiteral(node) && ["child_process", "node:child_process"].includes(node.text);
+  return node?.type === "StringLiteral" && ["child_process", "node:child_process"].includes(node.value);
 }
 
 /** Whether an initializer is a direct `require("child_process")` call. */
 function isChildProcessRequire(node) {
-  return node !== undefined &&
-    TS.isCallExpression(node) &&
-    TS.isIdentifier(node.expression) &&
-    node.expression.text === "require" &&
+  return isCall(node) &&
+    node.callee.type === "Identifier" &&
+    node.callee.name === "require" &&
     node.arguments.length === 1 &&
     isChildProcessModule(node.arguments[0]);
 }
@@ -543,61 +539,64 @@ function childProcessBindings(source) {
   const addFunction = (imported, local) => {
     if (PROCESS_COMMANDS.has(imported)) functions.set(local, imported);
   };
-  for (const statement of source.statements) {
-    if (!TS.isImportDeclaration(statement) || !isChildProcessModule(statement.moduleSpecifier)) continue;
-    const clause = statement.importClause;
-    if (clause === undefined || clause.isTypeOnly) continue;
-    if (clause.name !== undefined) namespaces.add(clause.name.text);
-    if (clause.namedBindings !== undefined && TS.isNamespaceImport(clause.namedBindings)) {
-      namespaces.add(clause.namedBindings.name.text);
-    }
-    if (clause.namedBindings !== undefined && TS.isNamedImports(clause.namedBindings)) {
-      for (const element of clause.namedBindings.elements) {
-        if (!element.isTypeOnly) addFunction(element.propertyName?.text ?? element.name.text, element.name.text);
+  for (const statement of source.body) {
+    if (statement.type !== "ImportDeclaration" || !isChildProcessModule(statement.source)) continue;
+    if (statement.importKind === "type") continue;
+    for (const specifier of statement.specifiers) {
+      if (specifier.type === "ImportDefaultSpecifier" || specifier.type === "ImportNamespaceSpecifier") {
+        namespaces.add(specifier.local.name);
+      }
+      if (specifier.type === "ImportSpecifier" && specifier.importKind !== "type") {
+        const imported = specifier.imported.name ?? specifier.imported.value;
+        addFunction(imported, specifier.local.name);
       }
     }
   }
-  const visit = (node) => {
-    if (TS.isVariableDeclaration(node) && isChildProcessRequire(node.initializer)) {
-      if (TS.isIdentifier(node.name)) namespaces.add(node.name.text);
-      if (TS.isObjectBindingPattern(node.name)) {
-        for (const element of node.name.elements) {
-          if (TS.isIdentifier(element.name)) {
-            addFunction(element.propertyName?.text ?? element.name.text, element.name.text);
-          }
-        }
+  walk(source, (node) => {
+    if (node.type !== "VariableDeclarator" || !isChildProcessRequire(node.init)) return;
+    if (node.id.type === "Identifier") namespaces.add(node.id.name);
+    if (node.id.type === "ObjectPattern") {
+      for (const property of node.id.properties) {
+        if (property.type !== "ObjectProperty") continue;
+        const local = property.value.type === "AssignmentPattern" ? property.value.left : property.value;
+        if (local.type !== "Identifier") continue;
+        const imported = property.key.name ?? property.key.value;
+        addFunction(imported, local.name);
       }
     }
-    node.forEachChild(visit);
-  };
-  visit(source);
+  });
   return { namespaces, functions };
 }
 
 /** The canonical process-function name a call invokes, excluding methods such as RegExp.exec. */
 function processCallee(node, bindings) {
-  if (!TS.isCallExpression(node)) return undefined;
-  if (TS.isIdentifier(node.expression)) {
-    return bindings.functions.get(node.expression.text) ??
-      (PROCESS_COMMANDS.has(node.expression.text) ? node.expression.text : undefined);
+  if (!isCall(node)) return undefined;
+  if (node.callee.type === "Identifier") {
+    return bindings.functions.get(node.callee.name) ??
+      (PROCESS_COMMANDS.has(node.callee.name) ? node.callee.name : undefined);
   }
   if (
-    TS.isPropertyAccessExpression(node.expression) &&
-    TS.isIdentifier(node.expression.expression) &&
-    bindings.namespaces.has(node.expression.expression.text) &&
-    PROCESS_COMMANDS.has(node.expression.name.text)
+    isMember(node.callee) &&
+    !node.callee.computed &&
+    node.callee.object.type === "Identifier" &&
+    bindings.namespaces.has(node.callee.object.name) &&
+    node.callee.property.type === "Identifier" &&
+    PROCESS_COMMANDS.has(node.callee.property.name)
   ) {
-    return node.expression.name.text;
+    return node.callee.property.name;
   }
   return undefined;
 }
 
 /** Literal command text, retaining a shell-visible placeholder for template substitutions. */
 function commandText(node) {
-  if (TS.isStringLiteral(node) || TS.isNoSubstitutionTemplateLiteral(node)) return node.text;
-  if (TS.isTemplateExpression(node)) {
-    return node.head.text + node.templateSpans
-      .map((span) => `$OPPORTUNE_DYNAMIC${span.literal.text}`)
+  if (node?.type === "StringLiteral") return node.value;
+  if (node?.type === "TemplateLiteral") {
+    return node.quasis
+      .map((quasi, index) => {
+        const text = quasi.value.cooked ?? quasi.value.raw;
+        return index === 0 ? text : `$OPPORTUNE_DYNAMIC${text}`;
+      })
       .join("");
   }
   return undefined;
@@ -606,16 +605,12 @@ function commandText(node) {
 /** Whether a literal options argument explicitly enables a command shell. */
 function usesShell(node) {
   return node.arguments.slice(1).some((argument) =>
-    TS.isObjectLiteralExpression(argument) && argument.properties.some((property) => {
-      if (
-        !TS.isPropertyAssignment(property) ||
-        !(TS.isIdentifier(property.name) || TS.isStringLiteral(property.name)) ||
-        property.name.text !== "shell"
-      ) {
-        return false;
-      }
-      return property.initializer.kind === TS.SyntaxKind.TrueKeyword ||
-        (commandText(property.initializer)?.length ?? 0) > 0;
+    argument.type === "ObjectExpression" && argument.properties.some((property) => {
+      if (property.type !== "ObjectProperty") return false;
+      const name = property.key.name ?? property.key.value;
+      if (name !== "shell") return false;
+      return (property.value.type === "BooleanLiteral" && property.value.value) ||
+        (commandText(property.value)?.length ?? 0) > 0;
     })
   );
 }
@@ -631,7 +626,7 @@ function processCommands(node, callee) {
 
   const arguments_ = node.arguments[1];
   if (text !== undefined && usesShell(node)) {
-    if (arguments_ === undefined || !TS.isArrayLiteralExpression(arguments_)) {
+    if (arguments_ === undefined || arguments_.type !== "ArrayExpression") {
       return shellCommands(text);
     }
     const args = arguments_.elements.map(commandText);
@@ -646,7 +641,7 @@ function processCommands(node, callee) {
   // Without `shell`, spawn/execFile take an executable and an argument array, not shell
   // source. Keep those words structured so whitespace, quotes and punctuation stay data.
   const words = [text ?? ""];
-  if (arguments_ !== undefined && TS.isArrayLiteralExpression(arguments_)) {
+  if (arguments_?.type === "ArrayExpression") {
     for (const element of arguments_.elements) {
       words.push(commandText(element) ?? "");
     }
@@ -660,32 +655,22 @@ function sourceScripts(file, content) {
     return content.split(/\r?\n/).map((text, index) => ({ file, line: index + 1, text }));
   }
 
-  const kind = /\.tsx$/.test(file)
-    ? TS.ScriptKind.TSX
-    : /\.jsx$/.test(file)
-      ? TS.ScriptKind.JSX
-      : /\.[cm]?ts$/.test(file)
-        ? TS.ScriptKind.TS
-        : TS.ScriptKind.JS;
-  const source = TS.createSourceFile(file, content, TS.ScriptTarget.ESNext, true, kind);
+  const source = parseSource(file, content);
   const bindings = childProcessBindings(source);
   const scripts = [];
-  const visit = (node) => {
+  walk(source, (node) => {
     const callee = processCallee(node, bindings);
-    if (callee !== undefined) {
-      const commands = processCommands(node, callee);
-      if (commands.length > 0) {
-        scripts.push({
-          file,
-          line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
-          text: node.getText(source),
-          commands,
-        });
-      }
+    if (callee === undefined) return;
+    const commands = processCommands(node, callee);
+    if (commands.length > 0) {
+      scripts.push({
+        file,
+        line: node.loc.start.line,
+        text: nodeText(node, content),
+        commands,
+      });
     }
-    node.forEachChild(visit);
-  };
-  visit(source);
+  });
   return scripts;
 }
 
@@ -734,7 +719,7 @@ function makefileScripts(file, content, recipeModifiers = false) {
  * A workflow is YAML and a package manifest is JSON, so both are read with the parser
  * that owns their grammar; a Makefile recipe is shell text with backslash continuations,
  * and a Markdown fenced block joins them the same way. JavaScript/TypeScript process
- * calls come from the TypeScript AST with their argument arrays intact; shell text and
+ * calls come from the Babel AST with their argument arrays intact; shell text and
  * `exec` command strings are tokenised with the shell parser. Each install is judged on
  * the options of its own command: a flag to the left of `;`/`&&`/`|` does not make the
  * install to the right safe.
@@ -1295,6 +1280,13 @@ test("the npm-install gate reads JSX and TSX harness entry points", () => {
   }
 });
 
+test("the npm-install gate preserves plain TypeScript syntax", () => {
+  const source = 'const value = <string>input; spawnSync("npm", ["ci"]);';
+  const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/fixture.ts`, source]]);
+  assert.equal(installs.length, 1, "a plain TypeScript angle assertion hid the install");
+  assert.equal(offenders.length, 1, "the plain TypeScript install has no --ignore-scripts");
+});
+
 test("a multiline JavaScript spawn cannot hide an npm install", () => {
   for (const comment of [undefined, "  // ))"]) {
     const source = [
@@ -1457,6 +1449,10 @@ test("aliased and scoped child_process bindings stay in the install gate", () =>
   for (const source of [
     'import { spawn as run } from "node:child_process"; run("npm", ["ci"]);',
     'const { spawn: run } = require("node:child_process"); run("npm", ["ci"]);',
+    'const { spawn: run = fallback } = require("node:child_process"); run("npm", ["ci"]);',
+    'const cp = require?.("node:child_process"); cp.exec("npm ci");',
+    'const cp = require("node:child_process"); cp?.exec("npm ci");',
+    'const cp = require("node:child_process"); cp.exec?.("npm ci");',
     'function f() { const cp = require("node:child_process"); return cp.spawn("npm", ["ci"]); }',
   ]) {
     const { installs, offenders } = npmInstalls([[`${INTEGRATION}/web/spawn.ts`, source]]);

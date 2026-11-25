@@ -29,7 +29,7 @@ opportune-json = { path = "../opportune-json", version = "0.2.1", default-featur
 opportune-adapters = { path = "../opportune-adapters", version = "0.2.1", default-features = false, features = [
   "schema",
 ] }
-proptest = "1"
+proptest = "1.12.0"
 serde.workspace = true
 serde_json.workspace = true
 
@@ -37,7 +37,7 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
-criterion = "0.8"
+criterion = "0.8.2"
 
 # Criterion brings its own harness, so `cargo bench` drives these directly.
 [[bench]]

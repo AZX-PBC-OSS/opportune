@@ -21,11 +21,11 @@
  *
  * The checks are AST walks rather than patterns: a top-level `await` is a position in a
  * tree, and a regex for `await` matches the identifier `awaitCount`, a string in a doc
- * comment, and a function body that is perfectly legal. `typescript` is the package's own
- * dev dependency, already the parser the declaration case uses. The same walkers pin
- * the bundled-runtime loaders' static `.wasm` imports, their distance from dynamic
- * compilation, and their lazy instantiation — properties a comment mentioning them
- * would otherwise satisfy.
+ * comment, and a function body that is perfectly legal. `@babel/parser` reads the emitted
+ * JavaScript without relying on the programmatic API TypeScript 7 no longer ships. The
+ * same walkers pin the bundled-runtime loaders' static `.wasm` imports, their distance
+ * from dynamic compilation, and their lazy instantiation — properties a comment
+ * mentioning them would otherwise satisfy.
  *
  * Build the package first:
  *
@@ -41,6 +41,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { forEachChild, isCall, isMember, nodeText, parseSource, walk } from "./support/ast.mjs";
 
 /** The package root this suite belongs to, and the tree the tarball packs. */
 const PACKAGE = join(import.meta.dirname, "..");
@@ -50,9 +51,6 @@ const DIST = join(PACKAGE, "dist");
 const MANIFEST = JSON.parse(readFileSync(join(PACKAGE, "package.json"), "utf8"));
 
 const require = createRequire(import.meta.url);
-
-/** The TypeScript compiler the package's own tooling pins; see the header. */
-const TS = require("typescript");
 
 /** Every JavaScript file `npm pack` would carry, as paths relative to `dist/`. */
 function shipped() {
@@ -79,35 +77,36 @@ function shipped() {
  * and says nothing about the module's own evaluation.
  */
 function topLevelSites(file, isSite) {
-  const source = TS.createSourceFile(
-    file,
-    readFileSync(file, "utf8"),
-    TS.ScriptTarget.ESNext,
-    true,
-    TS.ScriptKind.JS,
-  );
+  const content = readFileSync(file, "utf8");
+  const source = parseSource(file, content);
   const sites = [];
   const site = (node) => {
-    const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-    sites.push(relative(DIST, file) + ":" + String(line + 1));
+    sites.push(relative(DIST, file) + ":" + String(node.loc.start.line));
   };
-  const visit = (node, nested) => {
-    if (nested) {
-      return;
-    }
-    if (isSite(node)) {
+  const visit = (node) => {
+    if (isSite(node, content)) {
       site(node);
       return;
     }
-    const inner = TS.isFunctionLike(node);
-    if (inner && node.name !== undefined && TS.isComputedPropertyName(node.name)) {
-      // A method's body is deferred, but its computed name is evaluated with the
-      // surrounding module, so an await there is still top-level.
-      visit(node.name, false);
+    const inner = [
+      "FunctionDeclaration",
+      "FunctionExpression",
+      "ArrowFunctionExpression",
+      "ObjectMethod",
+      "ClassMethod",
+      "ClassPrivateMethod",
+    ].includes(node.type);
+    if (inner) {
+      if (node.computed && node.key !== undefined) {
+        // A method's body is deferred, but its computed name is evaluated with the
+        // surrounding module, so an await there is still top-level.
+        visit(node.key);
+      }
+      return;
     }
-    node.forEachChild((child) => visit(child, inner));
+    forEachChild(node, visit);
   };
-  visit(source, false);
+  visit(source);
   return sites;
 }
 
@@ -118,10 +117,9 @@ function topLevelSites(file, isSite) {
  */
 function AWAIT(node) {
   return (
-    TS.isAwaitExpression(node) ||
-    (TS.isForOfStatement(node) && node.awaitModifier !== undefined) ||
-    (TS.isVariableDeclarationList(node) &&
-      (node.flags & TS.NodeFlags.BlockScoped) === TS.NodeFlags.AwaitUsing)
+    node.type === "AwaitExpression" ||
+    (node.type === "ForOfStatement" && node.await) ||
+    (node.type === "VariableDeclaration" && node.kind === "await using")
   );
 }
 
@@ -138,28 +136,22 @@ function topLevelAwaits(file) {
  * what makes a `.wasm` import safe on `workerd` and unsafe on Node, so it is recorded.
  */
 function importedSpecifiers(file) {
-  const source = TS.createSourceFile(
-    file,
-    readFileSync(file, "utf8"),
-    TS.ScriptTarget.ESNext,
-    true,
-    TS.ScriptKind.JS,
-  );
+  const source = parseSource(file, readFileSync(file, "utf8"));
   const found = [];
-  const visit = (node) => {
-    if (TS.isImportDeclaration(node) || TS.isExportDeclaration(node)) {
-      if (node.moduleSpecifier !== undefined && TS.isStringLiteral(node.moduleSpecifier)) {
-        found.push({ specifier: node.moduleSpecifier.text, dynamic: false });
+  walk(source, (node) => {
+    if (["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type)) {
+      if (node.source?.type === "StringLiteral") {
+        found.push({ specifier: node.source.value, dynamic: false });
       }
-    } else if (TS.isCallExpression(node) && node.expression.kind === TS.SyntaxKind.ImportKeyword) {
+    } else if (node.type === "ImportExpression" && node.source.type === "StringLiteral") {
+      found.push({ specifier: node.source.value, dynamic: true });
+    } else if (node.type === "CallExpression" && node.callee.type === "Import") {
       const [first] = node.arguments;
-      if (first !== undefined && TS.isStringLiteral(first)) {
-        found.push({ specifier: first.text, dynamic: true });
+      if (first?.type === "StringLiteral") {
+        found.push({ specifier: first.value, dynamic: true });
       }
     }
-    node.forEachChild(visit);
-  };
-  visit(source);
+  });
   return found;
 }
 
@@ -171,25 +163,14 @@ function importedSpecifiers(file) {
  * text.
  */
 function webAssemblyUses(file) {
-  const source = TS.createSourceFile(
-    file,
-    readFileSync(file, "utf8"),
-    TS.ScriptTarget.ESNext,
-    true,
-    TS.ScriptKind.JS,
-  );
+  const content = readFileSync(file, "utf8");
+  const source = parseSource(file, content);
   const found = [];
-  const visit = (node) => {
-    if (
-      TS.isPropertyAccessExpression(node) &&
-      node.expression.getText(source) === "WebAssembly"
-    ) {
-      const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-      found.push(`${relative(DIST, file)}:${String(line + 1)}: ${node.getText(source)}`);
+  walk(source, (node) => {
+    if (isMember(node) && nodeText(node.object, content) === "WebAssembly") {
+      found.push(`${relative(DIST, file)}:${String(node.loc.start.line)}: ${nodeText(node, content)}`);
     }
-    node.forEachChild(visit);
-  };
-  visit(source);
+  });
   return found;
 }
 
@@ -201,34 +182,26 @@ function webAssemblyUses(file) {
  * refuse, written as an ordinary call; a comment saying the same is neither.
  */
 function compilingUses(file) {
-  const source = TS.createSourceFile(
-    file,
-    readFileSync(file, "utf8"),
-    TS.ScriptTarget.ESNext,
-    true,
-    TS.ScriptKind.JS,
-  );
+  const content = readFileSync(file, "utf8");
+  const source = parseSource(file, content);
   const found = [];
   const record = (node, text) => {
-    const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-    found.push(`${relative(DIST, file)}:${String(line + 1)}: ${text}`);
+    found.push(`${relative(DIST, file)}:${String(node.loc.start.line)}: ${text}`);
   };
-  const visit = (node) => {
-    if (TS.isCallExpression(node) && TS.isPropertyAccessExpression(node.expression)) {
-      const target = node.expression.getText(source);
+  walk(source, (node) => {
+    if (isCall(node) && isMember(node.callee)) {
+      const target = nodeText(node.callee, content).replaceAll("?.", ".");
       if (target === "WebAssembly.compile" || target === "WebAssembly.instantiate") {
         record(node, target);
       }
     }
-    if (TS.isNewExpression(node)) {
-      const target = node.expression.getText(source);
+    if (node.type === "NewExpression") {
+      const target = nodeText(node.callee, content);
       if (target === "WebAssembly.Module" || target === "WebAssembly.Instance") {
         record(node, `new ${target}`);
       }
     }
-    node.forEachChild(visit);
-  };
-  visit(source);
+  });
   return found;
 }
 
@@ -359,8 +332,8 @@ test("every loader instantiates on the first call, not when imported", () => {
   for (const file of ["wasm-workerd.js", "wasm-web.js"]) {
     const sites = topLevelSites(
       join(DIST, file),
-      (node) =>
-        TS.isCallExpression(node) && /(?:initSync|\binit)$/.test(node.expression.getText()),
+      (node, content) =>
+        isCall(node) && /(?:initSync|\binit)$/.test(nodeText(node.callee, content)),
     );
     assert.deepEqual(
       sites,
@@ -451,7 +424,7 @@ test("the loader walkers read the tree, not the text", () => {
     assert.equal(
       topLevelSites(
         file,
-        (node) => TS.isCallExpression(node) && node.expression.getText().endsWith("initSync"),
+        (node, content) => isCall(node) && nodeText(node.callee, content).endsWith("initSync"),
       ).length,
       1,
       "the top-level call walk did not separate the module-scope initialisation from the deferred one",
@@ -459,6 +432,31 @@ test("the loader walkers read the tree, not the text", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the loader walkers recognise optional calls and members", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "opportune-loader-optional-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "fixture.js");
+  writeFileSync(
+    file,
+    [
+      "WebAssembly?.compile(bytes);",
+      "WebAssembly.compile?.(bytes);",
+      "init?.({ module });",
+      "initSync?.({ module });",
+      "const later = () => init?.({ module });",
+      "export { later };",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(webAssemblyUses(file).length, 2, "optional WebAssembly members escaped the walk");
+  assert.equal(compilingUses(file).length, 2, "optional WebAssembly calls escaped the walk");
+  assert.equal(
+    topLevelSites(file, isCall).length,
+    4,
+    "optional initialisers were not separated from the deferred call",
+  );
 });
 
 test("the manifest resolves `#wasm` to the loader each runtime names", () => {

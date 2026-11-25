@@ -39,7 +39,7 @@ classifiers = [
 # The generated models in `python/opportune/_models.py` are Pydantic v2 models, and
 # they are part of the installed package, so pydantic is a runtime dependency of the
 # wheel rather than a tool of ours.
-dependencies = ["pydantic>=2.14"]
+dependencies = ["pydantic>=2.14.4"]
 
 [project.urls]
 Homepage = "https://github.com/AZX-PBC-OSS/opportune"
@@ -52,25 +52,25 @@ dev = [
   # pins the version: its output is byte-checked by `make check-codegen`, so a bump
   # that would change the generated file shows up as a diff rather than silently
   # rewriting it.
-  "datamodel-code-generator>=0.98",
+  "datamodel-code-generator[ruff]>=0.100",
   # The FastAPI suite serves the generated models from a real app, so the framework
   # under test is a dev dependency: the wheel depends on Pydantic alone, and an
   # application brings whichever ASGI framework it uses.
   "fastapi>=0.165",
   # Starlette's test client talks to `httpx2`, the maintained successor to `httpx`,
   # and deprecation-warns on the older client. Nothing else needs either.
-  "httpx2>=2.16",
+  "httpx2>=2.16.2",
   "pyright>=1.1.414",
   "pytest>=9.2.0",
-  # A minor-level floor, unlike the two above, so the cooldown below can still resolve
-  # while ruff's newest patch is inside the window. `uv.lock` carries the exact version.
-  "ruff>=0.17",
+  # The floor moves deliberately; `uv.lock` carries the exact version and the cooldown
+  # below filters every re-resolution.
+  "ruff>=0.17.6",
 ]
 # Non-default group (see default-groups below): only the docs workflow and `make
 # docs` need mkdocs, so a plain `uv sync` never pays for it.
 docs = [
   "mkdocs>=1.6.1",
-  "mkdocs-material>=9.7.7",
+  "mkdocs-material>=9.8.2",
 ]
 
 [tool.uv]

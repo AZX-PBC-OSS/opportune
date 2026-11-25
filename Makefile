@@ -209,10 +209,13 @@ docs-serve:
 # an unused `type Model = Any` alias; the post-pass drops it before ruff runs, and
 # ruff's own fix pass then removes the `Any` import it leaves behind.
 MODELS := crates/opportune-py/python/opportune/_models.py
+# Ruff owns formatting here, so the generator uses the same toolchain as the post-pass.
+# The unsigned formats map to `int`; the post-pass supplies their bounds.
 CODEGEN_FLAGS := --input-file-type jsonschema --output-model-type pydantic_v2.BaseModel \
 	--target-python-version 3.12 --use-standard-collections --use-union-operator \
 	--use-annotated --use-type-alias --use-title-as-name --field-constraints \
 	--allow-population-by-field-name --enum-field-as-literal all --disable-timestamp \
+	--formatters ruff-check ruff-format --type-mappings integer+uint32=integer integer+uint64=integer \
 	--base-class opportune._base.OpportuneModel
 # The drift check formats its output in a temporary directory, outside the project,
 # where ruff would discover no configuration and fall back to its defaults; naming the
